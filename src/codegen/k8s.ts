@@ -18,6 +18,8 @@
  *                                          + attribution section (7x)
  *                                          + signature pack (rulePolicies, M4)
  *   - wazuh/manager/sbob/k8s-api-audit.md  API-server audit ingestion path
+ *   - wazuh/manager/sbob/<name>-envoy.md   Envoy JSON access-log contract for
+ *                                          endpoints[] drift (M6, TDS 13)
  *                                          (evaluated by the manager-side
  *                                          kubernetes-api-access rule)
  *   - wazuh/agent-conf/sbob/<name>-audit-digest.sh   node-side digest script (M5)
@@ -44,6 +46,7 @@ import type { Decoder, XmlRule } from "./xml.ts";
 import { renderDecoder, renderRule, xmlFileHeader } from "./xml.ts";
 import type { BundleFile } from "./linux.ts";
 import { auditDecoders, auditFragmentLines, cdbListFiles, linuxSectionRules } from "./linux.ts";
+import { envoyIngestionDoc, envoyListFiles, envoyRules } from "./envoy.ts";
 import { signatureRulesK8s, signatureRulesShared, signatureCoverageNotes } from "./signatures.ts";
 import {
   auditKeySetDigest,
@@ -91,6 +94,8 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
   // 2. CDB allowlists + podmap seed
   // --------------------------------------------------------------------------
   for (const f of cdbListFiles(ir, name)) files.push(f);
+  // M6 endpoints[]: per-direction CDB path allowlists (section present only)
+  for (const f of envoyListFiles(ir, name)) files.push(f);
   files.push({
     path: "wazuh/lists/sbob/k8s/podmap",
     content: [
@@ -246,6 +251,9 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
     rules.push(configCheckRule(ir, alloc, configDigest));
     if (cadence !== undefined) rules.push(cadence);
 
+    // M6 endpoints[] section (TDS 13): L7 endpoint drift via envoy JSON (9,1)/(9,2)
+    rules.push(...envoyRules(ir, alloc, name));
+
     const xml = [
       xmlFileHeader(`sbob drift + attribution + signature + ops rules for workload ${name} — k8s-node target`, name, LAB_NOTE),
       "",
@@ -265,6 +273,10 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
     path: "wazuh/manager/sbob/k8s-api-audit.md",
     content: k8sApiAuditDoc(name),
   });
+  // M6: envoy access-log ingestion contract (emitted when endpoints[] present)
+  if ((ir.sections.endpoints ?? []).length > 0) {
+    files.push(envoyIngestionDoc(ir, name));
+  }
 
   // --------------------------------------------------------------------------
   // 7. bundle manifest (machine-generated coverage matrix: TDS 8, M4)

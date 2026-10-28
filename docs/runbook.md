@@ -134,3 +134,31 @@ production pilot adds the following; record evidence per item:
       the reverted fragment is installed.
 - [ ] **Bundle version**: the deployed manifest `bundleVersion` matches the
       SBoB version + image digest under management.
+
+## 8. Phase-2 engine bundles (M6) — deploy notes
+
+The `--target falco` bundle is deployed in two halves:
+
+- **Wazuh side** — `wazuh/rules/sbob/100000_redis_falco.xml` (correlation
+  rule 100103) and `wazuh/manager/sbob/redis-falco.md` follow the normal
+  M5 flow: `scripts/sync-manager.sh` flattens the rule into the manager
+  ruleset and the `localfile json` block goes into the manager's
+  `ossec.conf`. Nothing new operationally.
+- **Node side** — `falco/sbob/redis_rules.yaml` and
+  `falco/sbob/redis-daemonset.yaml` are applied as a DaemonSet
+  (ConfigMap-embedded rules + falcosidekick with `FALCOSIDEKICK_WAZUH_URL`
+  pointing at the manager). Falco alerts therefore arrive as native JSON;
+  rule 100103 correlates them by `output_fields.container.name` — one pane
+  of glass beside the auditd alerts, no decoder changes.
+- **Split-brain caveat**: falco rules are not synced by
+  `sync-manager.sh` (which only maps `wazuh/` paths); the DaemonSet is a
+  separate k8s artifact. When the SBoB changes, regenerate and re-apply
+  *both* halves — a stale DaemonSet alerts against the old allowlist while
+  Wazuh rules enforce the new one. The sigma/velociraptor/mde artifacts
+  need no deploy action (they feed external tooling directly).
+- **Envoy (endpoints[])**: when a workload declares `endpoints[]`, the k8s
+  bundle additionally carries `wazuh/lists/sbob/<name>/endpoints_{in,out}`
+  and the `(9,1)/(9,2)` rules; the manager doc
+  `wazuh/manager/sbob/<name>-envoy.md` pins the Envoy access-log format
+  contract that must be configured on the sidecar before the rules are
+  meaningful (lab validation pending).

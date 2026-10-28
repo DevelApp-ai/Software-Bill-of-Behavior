@@ -15,9 +15,9 @@ jobs:
           node-version: 22
       - name: Unit + golden tests (zero-dependency, no install)
         run: node --test test/*.test.ts
-      - name: Codegen determinism gate — twice-run byte diff, all 3 targets (TDS 11.4, M4)
+      - name: Codegen determinism gate — twice-run byte diff, all 7 targets (TDS 11.4, M4/M6)
         run: |
-          for target in linux windows k8s-node; do
+          for target in linux windows k8s-node sigma velociraptor mde falco; do
             rm -rf /tmp/run1 /tmp/run2
             node src/cli.ts transpile --sbob sbobs/redis.yaml --out /tmp/run1 --target "$target" --skip-signature-verify
             node src/cli.ts transpile --sbob sbobs/redis.yaml --out /tmp/run2 --target "$target" --skip-signature-verify
@@ -26,6 +26,8 @@ jobs:
           done
       - name: Attack-suite false-negative gate (TDS 11.3, M4)
         run: node scripts/attack-false-negative-check.ts
+      - name: Engine blind-spot matrix gate (TDS 13, M6)
+        run: node scripts/engine-matrix-check.ts
       - name: Diff-gate determinism + golden report + verdict exit codes (TDS 16, M8)
         run: |
           node src/cli.ts diff --old test/diffgate-fixtures/base.yaml --new test/diffgate-fixtures/drifted.yaml --report /tmp/dg1.json > /tmp/dg1.md || dg_exit=$?

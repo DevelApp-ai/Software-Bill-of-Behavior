@@ -6,7 +6,10 @@
  * Band 100000-199999. Slots are allocated once from a committed registry
  * (docs/sbob-registry.yaml) and never reused. Section codes: 0 base, 1 execs,
  * 2 opens, 3 egress, 4 ingress, 5 capabilities, 6 rulePolicies, 7 attribution,
- * 8 ops (M5: config-check (8,3), sbob-cadence (8,1); TDS 6.1 amendment).
+ * 8 ops (M5: config-check (8,3), sbob-cadence (8,1); TDS 6.1 amendment),
+ * 9 endpoints (M6: L7 endpoint drift via Envoy JSON access-log ingestion; TDS 6.1
+ *   amendment — variants: (9,0) base, (9,1) inbound drift, (9,2) outbound drift),
+ * 10 engines (M6: phase-2 engine correlation; (10,3) = falco alert correlation info).
  *
  * Variant digits (deviation from TDS 6.1, documented there):
  *   0-4 = Linux / k8s-node rule kinds: 0 base, 1 drift, 2 escalation, 3 informational, 4 exemption
@@ -25,6 +28,8 @@ export const SECTION_CODES = {
   base: 0, execs: 1, opens: 2, egress: 3, ingress: 4,
   capabilities: 5, rulePolicies: 6, attribution: 7,
   ops: 8,
+  endpoints: 9,
+  engines: 10,
 } as const;
 
 export const LINUX_VARIANTS = { base: 0, drift: 1, escalation: 2, info: 3, exemption: 4 } as const;

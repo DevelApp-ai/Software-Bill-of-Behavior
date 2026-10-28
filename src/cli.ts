@@ -4,7 +4,8 @@
  * Usage:
  *   node src/cli.ts transpile --sbob <file.yaml> [--sbob <file2.yaml>]
  *         [--registry docs/sbob-registry.yaml] [--out dist/bundle]
- *         [--target linux|windows|k8s-node] [--skip-signature-verify] [--confirm-none execs,opens]
+ *         [--target linux|windows|k8s-node|sigma|velociraptor|mde|falco]
+ *         [--skip-signature-verify] [--confirm-none execs,opens]
  *   node src/cli.ts validate --sbob <file.yaml> [--confirm-none execs,opens]
  *   node src/cli.ts diff --old <a.yaml> --new <b.yaml>
  *         [--report <path>] [--fail-on none|advisory|mandatory]
@@ -32,7 +33,8 @@ options:
   --sbob <path>                 SBoB YAML file (repeatable for transpile)
   --registry <path>             workload slot registry (default docs/sbob-registry.yaml)
   --out <dir>                   bundle output directory (default dist/bundle)
-  --target <name>               codegen target: linux (M1), windows (M2), k8s-node (M3)
+  --target <name>               codegen target: linux (M1), windows (M2), k8s-node (M3),
+                                 sigma / velociraptor / mde / falco (M6, TDS 13)
   --skip-signature-verify       skip SBoB signature verification (development profiles only)
   --confirm-none <section,...>  accept explicitly-empty (NONE) sections
   --old <path>                  (diff) prior-release SBoB YAML
@@ -122,14 +124,15 @@ async function main(): Promise<void> {
   try {
     if (args.command === "transpile") {
       if (args.sbob.length === 0) usage();
-      if (args.target !== "linux" && args.target !== "windows" && args.target !== "k8s-node") {
-        console.error(`target "${args.target}" is not available (targets: linux, windows, k8s-node)`);
+      const KNOWN_TARGETS = ["linux", "windows", "k8s-node", "sigma", "velociraptor", "mde", "falco"] as const;
+      if (!(KNOWN_TARGETS as readonly string[]).includes(args.target)) {
+        console.error(`target "${args.target}" is not available (targets: ${KNOWN_TARGETS.join(", ")})`);
         exit(2);
       }
       const result = await transpile(args.sbob, {
         registryPath: args.registry,
         outDir: args.out,
-        target: args.target as "linux" | "windows" | "k8s-node",
+        target: args.target as "linux" | "windows" | "k8s-node" | "sigma" | "velociraptor" | "mde" | "falco",
         skipSignatureVerify: args.skipSignatureVerify,
         confirmNone: args.confirmNone,
       });

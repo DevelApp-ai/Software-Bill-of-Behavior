@@ -46,6 +46,7 @@ export const REASON_CODES: Record<string, string> = {
   K8SPEER_PHASE3: "podSelector/namespaceSelector entries deferred to the Phase-3 NetworkPolicy diff (TDS 14.3)",
   INGRESS_ACCEPT_WEAK: "Linux accept() telemetry cannot attribute peers; host-firewall ingestion recommended (TDS 8)",
   ENDPOINTS_L7: "HTTP endpoints[] require an L7 source (proxy access logs / Suricata EVE); Phase 2 (TDS 13)",
+  ENVOY_L7: "k8s endpoint drift is evaluated via the documented Envoy JSON access-log ingestion ((9,1)/(9,2) manager-side rules, TDS 13): path-level only — methods are reported, headers[] are not evaluable; linux/windows stay gap (no L7 plane there)",
   CAPS_PENDING: "capabilities[] rules are not yet implemented (baseline capset audit, M4-PENDING)",
   SIG_WIN_DEFERRED: "Windows signature-rule equivalent (Sysmon EID) deferred to a later milestone (TDS 7.4)",
   SIG_CORRELATE: "cross-event correlation delivered as a triage informational rule, not a single-event rule (TDS 7.4)",
@@ -193,7 +194,7 @@ export function buildCoverageMatrix(ir: IR): CoverageMatrix {
       ? {
           linux: cell("gap", ["ENDPOINTS_L7"]),
           windows: cell("gap", ["ENDPOINTS_L7"]),
-          k8s: cell("gap", ["ENDPOINTS_L7"]),
+          k8s: cell("partial", ["ENVOY_L7"]),
         }
       : absentAll(),
   });

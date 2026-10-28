@@ -109,7 +109,7 @@ test("completeness gate passes for redis and fails on a broken matrix", () => {
 test("every REASON_CODE value is a stable identifier key (documented, not silent)", () => {
   const expected = [
     "SECTION_ABSENT", "ARGS_WIN_CMDLINE", "OPEN_CREATE_ONLY_WIN", "FLAGS_DEFERRED",
-    "DNS_NODE_BLIND", "K8SPEER_PHASE3", "INGRESS_ACCEPT_WEAK", "ENDPOINTS_L7",
+    "DNS_NODE_BLIND", "K8SPEER_PHASE3", "INGRESS_ACCEPT_WEAK", "ENDPOINTS_L7", "ENVOY_L7",
     "CAPS_PENDING", "SIG_WIN_DEFERRED", "SIG_CORRELATE", "SIG_PARENT_REQUIRED",
     "SIG_MANAGER_JSON", "SIG_SADDR_PENDING", "SIG_EXEMPT_SUPPRESSED", "SIG_NODE_SCOPED",
   ];

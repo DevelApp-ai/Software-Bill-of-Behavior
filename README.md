@@ -13,7 +13,7 @@ Monitor **Linux**, **Windows**, and **Kubernetes** deployments from one declared
 | M3 | Kubernetes attribution: `--target k8s-node` (cgroup decoders, podmap, attribution rules, docker-listener lifecycle, attack matrix) — implemented, lab validation pending | [#4](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/4) |
 | M4 | rulePolicies signature rules (module-load / namespace-change / ptrace / memfd, sensitive-path + SA-token + k8s-API overlays, manager-side k8s-audit JSON rule), machine-generated coverage matrix, attack false-negative harness, CI determinism gate — implemented, lab validation pending | [#5](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/5) |
 | M5 | GitOps deployment + ops runbook: `scripts/sync-manager.sh` bundle→manager sync (rules/decoders flattened, CDB lists path-preserved, agent groups materialized), ops-health rules (config-check (8,3) audit-rollout signal, sbob-cadence (8,1) image-digest guard), `bundleVersion` manifest field, [docs/runbook.md](docs/runbook.md) with rollout/rollback/triage and the production pilot checklist — implemented, production pilot pending | [#6](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/6) |
-| M6 | Phase 2: Sigma/Sysmon, Velociraptor, MDE, Falco codegen | [#7](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/7) |
+| M6 | Phase 2 codegen: `--target sigma` (auditd execve/open/connect + Sysmon EID 1/3/11/22 filter-block rules, deterministic v5 UUIDs), `--target velociraptor` (RE2-safe pslist/netstat conformance sweeps), `--target mde` (DeviceProcessEvents/DeviceFileEvents/DeviceNetworkEvents KQL hunts), `--target falco` (list-based drift rules + DaemonSet + Falcosidekick→Wazuh correlation rule 100103), Envoy `endpoints[]` ingestion ((9,1)/(9,2) manager-side rules) and the per-engine blind-spot matrix ([docs/engine-matrix.md](docs/engine-matrix.md), CI-gated) — implemented, lab validation pending | [#7](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/7) |
 | M7 | Phase 3: enforcement | [#8](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/8) |
 | M8 | SBoB semantic diff gate: scored release deltas (`sbobctl diff`) | [#13](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/13) |
 | M9 | Release profiler: observed-behavior → SBoB redraft assist (outline) | [#14](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/14) |
@@ -44,6 +44,8 @@ Signature rules (M4) invert the model: generic Wazuh rules (audit keys like `sbo
 
 Ops health (M5) closes the loop around the deployed bundle: rule (8,3) config-check keeps firing on any node whose installed sbob audit key-set digest does not match the bundle (audit rules are not hot-deployable — it is the rollout completion signal), and rule (8,1) sbob-cadence alerts when a container starts from the workload image repo with a non-pinned digest. `scripts/sync-manager.sh <bundle>` deploys a bundle into the manager layout and `docs/runbook.md` covers rollout, rollback and alert triage.
 
+Phase-2 engines (M6) reuse the same IR: Sigma rules invert the SBoB allowlists with filter blocks (`condition: selection and not 1 of filter_peer_*`), the Velociraptor artifact runs hunt-time `pslist`/`netstat` conformance sweeps with RE2-safe anchored regexes, MDE gets per-section KQL advanced-hunting queries, and the Falco bundle (rules + DaemonSet) ships its alerts to the Wazuh manager through Falcosidekick, correlated by rule (10,3) `100103`. `endpoints[]` sections get Envoy access-log ingestion ((9,1)/(9,2) manager-side path-drift rules). Per-engine coverage of the 62-attack redis suite is tracked in [docs/engine-matrix.md](docs/engine-matrix.md) — no attack is blind everywhere unless the blind spot is already a documented class in the attack matrix; CI re-checks this (`scripts/engine-matrix-check.ts`).
+
 Drift detection is allowlist-based: every observed `execve`/`open`/`connect` that is **not** declared in the SBoB raises a Wazuh alert. Allowlists are enforced with CDB list lookups (`not_match_key` / `not_address_match_key`) plus negated PCRE2 alternations for wildcarded entries — see [TDS §5](docs/TDS.md).
 
 ## Usage
@@ -60,6 +62,12 @@ node src/cli.ts transpile --sbob sbobs/redis.yaml --out dist/bundle-win --target
 # kubernetes node target (attribution: cgroup decoders + podmap + docker-listener lifecycle;
 # requires the shipped docker integration ruleset, parent rule 87900)
 node src/cli.ts transpile --sbob sbobs/redis.yaml --out dist/bundle-k8s --target k8s-node --registry docs/sbob-registry.yaml --skip-signature-verify
+
+# phase-2 engine targets (M6): sigma, velociraptor, mde, falco
+node src/cli.ts transpile --sbob sbobs/redis.yaml --out dist/bundle-sigma --target sigma --registry docs/sbob-registry.yaml --skip-signature-verify
+node src/cli.ts transpile --sbob sbobs/redis.yaml --out dist/bundle-velo --target velociraptor --registry docs/sbob-registry.yaml --skip-signature-verify
+node src/cli.ts transpile --sbob sbobs/redis.yaml --out dist/bundle-mde --target mde --registry docs/sbob-registry.yaml --skip-signature-verify
+node src/cli.ts transpile --sbob sbobs/redis.yaml --out dist/bundle-falco --target falco --registry docs/sbob-registry.yaml --skip-signature-verify
 
 # schema-validate only
 node src/cli.ts validate --sbob sbobs/redis.yaml
