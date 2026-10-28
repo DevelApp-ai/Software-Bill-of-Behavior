@@ -26,6 +26,18 @@ jobs:
           done
       - name: Attack-suite false-negative gate (TDS 11.3, M4)
         run: node scripts/attack-false-negative-check.ts
+      - name: Diff-gate determinism + golden report + verdict exit codes (TDS 16, M8)
+        run: |
+          node src/cli.ts diff --old test/diffgate-fixtures/base.yaml --new test/diffgate-fixtures/drifted.yaml --report /tmp/dg1.json > /tmp/dg1.md || dg_exit=$?
+          test "$dg_exit" = 1
+          node src/cli.ts diff --old test/diffgate-fixtures/base.yaml --new test/diffgate-fixtures/drifted.yaml --report /tmp/dg2.json > /tmp/dg2.md || true
+          diff /tmp/dg1.md /tmp/dg2.md
+          diff /tmp/dg1.json /tmp/dg2.json
+          diff /tmp/dg1.json test/diffgate-fixtures/expected-report.json
+          grep -q MANDATORY /tmp/dg1.md
+          node src/cli.ts diff --old test/diffgate-fixtures/base.yaml --new test/diffgate-fixtures/base.yaml > /tmp/dg0.md
+          grep -q "No scored behavior changes" /tmp/dg0.md
+          echo "diff gate OK: deterministic, golden, verdict + exit codes"
 
   typecheck:
     runs-on: ubuntu-latest

@@ -524,8 +524,62 @@ stateDiagram-v2
 | M5 | Deploy-repo GitOps flow + ops runbook | production pilot on one workload |
 | M6 | Phase 2 codegen (Sigma, Velociraptor, MDE, Falco) | per-engine blind-spot matrix |
 | M7 | Phase 3 enforcement behind state machine | enforcement pilot in Audit mode |
+| M8 | SBoB semantic diff gate — scored release deltas (`sbobctl diff`, §16) | fixture pair Δ = 45 mandatory + immediate review; golden JSON committed; CI determinism/verdict step |
+| M9 | Release profiler — observed vs declared behavior redraft assist (§17) | profile schema agreed; redraft proposal prototype on one workload |
 
 ---
+
+---
+
+## 16. M8 — SBoB semantic diff gate (release promotion gate)
+
+### 16.1 Purpose and semantics
+
+`sbobctl diff` compares two releases of the same workload **after parsing and validation, never as raw YAML text**: a reformatted or key-reordered file diffs to Δ = 0. Both inputs must describe the same workload (`metadata.name`); anything else is rejected with `ERR_WORKLOAD_MISMATCH`. The gate is a promotion-time check on the *declaration*: it does not observe live behavior (that is M9's profiler, §17) — it scores what the declared contract changed between two reviewed artifacts.
+
+### 16.2 Scored delta ladder (v1, proposal-grade)
+
+| Δ class | Weight | Trigger |
+|---|---|---|
+| New Linux capability; new `rulePolicies` exemption (`processAllowed` addition or new policy, `containerAllowed: true`, `rulePolicies` → explicit NONE) | +5 | each |
+| New `execs` path outside the package namespace | +4 | each |
+| New egress DNS name outside internal suffixes | +3 | each |
+| New egress IP / port; write-flag `opens` (new path or write flags added); widened wildcard (literal-prefix shortening of a prior pattern); new ingress peer sub-item | +2 | each |
+| Removed entries (all sections); new `execs` path inside the package namespace; new read-only `opens` | +1 | each |
+
+Weights are proposal-grade defaults (field-guide chapter "Behavior Deltas at the Release Gate"): calibrate against a real estate's release history before enforcing the mandatory threshold in anger.
+
+### 16.3 Verdicts and thresholds
+
+- **clean**: Δ below the advisory threshold (default 10; both thresholds optionable per call).
+- **advisory**: Δ ≥ 10 — attach the delta report to the promotion record; notify the owning team.
+- **mandatory**: Δ ≥ 25 **or any single +5 class present** — promotion blocks until a human signs the delta. The immediate-review rule means one new capability or one suppressed signature rule forces review regardless of the total.
+
+### 16.4 Classification inputs
+
+- **Package namespace**: default is the set of parent directories of the prior release's exact (non-wildcard) `execs`; overridable with repeatable `--namespace`. No prior exact execs ⇒ namespace unknown ⇒ every new exec path conservatively scores +4.
+- **Internal DNS suffixes**: defaults `svc`, `cluster.local`, `internal`, `local`; extendable with repeatable `--internal-suffix`. An external DNS name scores +3, an internal one +2.
+- **Coverage, not restating**: exact entries newly covered by a prior wildcard (or patterns already covered) score 0 and are reported as `covered` — the ladder scores *widening*, not re-declaring.
+
+### 16.5 Output contract and determinism
+
+The machine-readable JSON report (`--report`) and the markdown report (stdout) are **deterministic**: identical inputs produce byte-identical output (delta sorted by section, then weight descending, change, entry). CI runs the committed fixture pair twice and byte-compares both channels plus the golden JSON (`test/diffgate-fixtures/expected-report.json`), mirroring the codegen determinism gate (§11.4, org decision #26). The fixture pair (`base.yaml` → `drifted.yaml`, workload `webcache`) exercises every ladder class and scores Δ = 45: mandatory with immediate review.
+
+### 16.6 CLI and exit codes
+
+`sbobctl diff --old <a.yaml> --new <b.yaml> [--report <path>] [--fail-on none|advisory|mandatory] [--namespace <dir>] [--internal-suffix <suffix>]` — exit code 0/1 by verdict at or above the `--fail-on` level (default `mandatory`; `none` always exits 0). Intended for the promotion pipeline; a wrapper GitHub Action composing it with transpile artifacts is tracked on the M8 issue ([#13](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/13)) as follow-up.
+
+### 16.7 Honest limits (v1)
+
+- `endpoints[]` and `execs.args` changes are **reported but unweighted**: HTTP-level behavior is not observable from the Phase 1 telemetry plane (revisit at Phase 2 L7 ingestion).
+- The gate compares declarations only; it cannot catch drift that never gets declared. Closing that loop is M9.
+- Thresholds are per-call options, not policy-as-code yet; the wrapper Action should pin them per workload once calibrated.
+
+---
+
+## 17. M9 — Release profiler (outline)
+
+The profiler closes the M8 gap: compare *observed* behavior (Wazuh alert history for the workload: drift hits, benign silence, signature-rule fires) against the *declared* SBoB over a release window, and propose redrafts: undeclared-but-benign events become candidate entries for the next SBoB; declared-but-never-observed entries become prune candidates; persistent drift on one path is promoted to an explicit review. Output is a proposal document, never an automatic manifest edit — every redraft goes through the diff gate (§16) and human sign-off. Tracked in [#14](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/14).
 
 ## Appendix A — References
 
