@@ -1,0 +1,52 @@
+# Candidate SBoB derived by sbobctl profile (M9) — OBSERVATION, NOT INTENT.
+# Every derived entry carries provenance in legacy-cache.provenance.json.
+# The contract becomes declaration only when a human reviews and signs this draft.
+apiVersion: sbob.k8sstormcenter.io/v1
+kind: SoftwareBillOfBehavior
+metadata:
+  name: legacy-cache
+  namespace: legacy-tier
+  annotations:
+    sbob.develapp.io/derived: sbobctl-profile-v1
+    sbob.develapp.io/provenance: legacy-cache.provenance.json
+    sbob.develapp.io/window-days: "30"
+    sbob.develapp.io/window-from: 2026-09-01T02:30:00Z
+    sbob.develapp.io/window-to: 2026-09-30T06:00:05Z
+spec:
+  imageID: docker.io/legacy/cache@sha256:c0ffee00000000000000000000000000000000000000000000000000000000ff
+  execs:
+  - path: /usr/bin/cache-migrate
+    args:
+      - "--to"
+      - v3
+  - path: /usr/bin/legacy-cache
+    args:
+      - "--daemon"
+  opens:
+  - path: /etc/legacy-cache/config.conf
+    flags:
+      - O_RDONLY
+  - path: /tmp/.cache-stamp
+    flags:
+      - O_RDONLY
+  - path: /var/backups/legacy-cache.bak
+    flags:
+      - O_WRONLY
+  - path: /var/lib/legacy-cache/data.db
+    flags:
+      - O_RDWR
+      - O_CREAT
+  egress:
+  - ports:
+    - protocol: TCP
+      port: 6379
+    ipAddresses:
+      - 10.2.0.7
+  ingress:
+  - ports:
+    - protocol: TCP
+      port: 6379
+    ipAddresses:
+      - 10.2.0.9
+  capabilities:
+    - CAP_NET_BIND_SERVICE
