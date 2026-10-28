@@ -7,6 +7,9 @@
  *   - wazuh/lists/sbob/<name>/*            CDB allowlists (execs, opens, egress_addrs, ingress_addrs,
  *                                          sigexempts/<policy> for rulePolicies.processAllowed, M4)
  *   - wazuh/rules/sbob/<base>_<name>_linux.xml   drift rules + signature pack (rulePolicies, M4)
+ *                                          + ops section (config-check, M5)
+ *   - wazuh/agent-conf/sbob/<name>.xml     config-check command wodle (M5, TDS 10.1)
+ *   - wazuh/agent-conf/sbob/<name>-audit-digest.sh   node-side digest script (M5)
  *   - <name>.manifest.json                 workload bundle manifest + coverage matrix (TDS 8)
  *
  * The audit fragment, CDB lists, decoder chain and section drift rules are
@@ -20,6 +23,14 @@ import type { IR } from "../types.ts";
 import type { Decoder, XmlRule } from "./xml.ts";
 import { renderDecoder, renderRule, xmlFileHeader } from "./xml.ts";
 import { signatureAuditLines, signatureExemptListFiles, signatureRulesShared, signatureCoverageNotes } from "./signatures.ts";
+import {
+  auditKeySetDigest,
+  configCheckDecoder,
+  configCheckRule,
+  configCheckWodleBlock,
+  auditDigestScriptContent,
+  bundleVersion,
+} from "./opshealth.ts";
 import { buildCoverageMatrix, assertCoverageComplete } from "../coverage.ts";
 
 export interface BundleFile {
@@ -362,6 +373,8 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
 
   // 1. auditctl fragment ------------------------------------------------------
   const { lines: auditLines, auditKeys } = auditFragmentLines(ir);
+  // M5: config-check digest over the emitted sbob audit key set (TDS 10.1)
+  const configDigest = auditKeySetDigest(auditLines);
   files.push({ path: `wazuh/audit/sbob/${name}.rules`, content: auditLines.join("\n") + "\n" });
 
   // 2. CDB allowlists -----------------------------------------------------------
@@ -369,7 +382,7 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
 
   // 3. decoder chain ------------------------------------------------------------
   {
-    const decoders = auditDecoders(name, auditKeys);
+    const decoders = [...auditDecoders(name, auditKeys), configCheckDecoder(name)];
     const xml = [
       xmlFileHeader(`sbob decoders for workload ${name} — routing on generated audit keys`, name, LAB_NOTE),
       "",
@@ -382,9 +395,9 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
   // 4. rules XML: section drift rules + signature pack (rulePolicies, M4) ----
   {
     const base = linuxSectionRules(ir, alloc);
-    const rules = [...base, ...signatureRulesShared(ir, alloc, base)];
+    const rules = [...base, ...signatureRulesShared(ir, alloc, base), configCheckRule(ir, alloc, configDigest)];
     const xml = [
-      xmlFileHeader(`sbob drift + signature rules for workload ${name} — Linux / k8s-node target`, name, LAB_NOTE),
+      xmlFileHeader(`sbob drift + signature + ops rules for workload ${name} — Linux / k8s-node target`, name, LAB_NOTE),
       "",
       ...rules.map(renderRule).join("\n\n").split("\n"),
       "",
@@ -393,6 +406,22 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
       path: `wazuh/rules/sbob/${ID_BAND_BASE(alloc)}_${name}_linux.xml`,
       content: xml,
     });
+  }
+
+  // 4b. agent configuration fragment (M5, TDS 10.1) -------------------------
+  {
+    const xml = [
+      xmlFileHeader(
+        "sbobctl generated agent configuration fragment — merge into the workload group agent.conf",
+        name,
+        "config-check wodle: reports the node's installed sbob audit key set digest every 30m; the manager-side rule (8,3) alerts when the node needs an audit.rules rollout (TDS 10.1)",
+      ),
+      "",
+      ...configCheckWodleBlock(name),
+      "",
+    ].join("\n");
+    files.push({ path: `wazuh/agent-conf/sbob/${name}.xml`, content: xml });
+    files.push({ path: `wazuh/agent-conf/sbob/${name}-audit-digest.sh`, content: auditDigestScriptContent() });
   }
 
   // 5. bundle manifest (machine-generated coverage matrix: TDS 8, M4) -------
@@ -409,6 +438,9 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
           {
             workload: ir.workload,
             target: "linux",
+            sbobVersion: ir.workload.sbobVersion,
+            imageID: ir.workload.imageID,
+            bundleVersion: bundleVersion(ir),
             files: files.map((f) => f.path),
             coverage,
             coverageNotes: [...ir.coverageNotes, ...signatureCoverageNotes(ir)],

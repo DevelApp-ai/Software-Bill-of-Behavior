@@ -12,7 +12,7 @@ Monitor **Linux**, **Windows**, and **Kubernetes** deployments from one declared
 | M2 | Windows Sysmon codegen (EIDs 1/3/11/22; args-drift heuristic, opens file-create partial) — implemented, lab validation pending | [#3](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/3) |
 | M3 | Kubernetes attribution: `--target k8s-node` (cgroup decoders, podmap, attribution rules, docker-listener lifecycle, attack matrix) — implemented, lab validation pending | [#4](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/4) |
 | M4 | rulePolicies signature rules (module-load / namespace-change / ptrace / memfd, sensitive-path + SA-token + k8s-API overlays, manager-side k8s-audit JSON rule), machine-generated coverage matrix, attack false-negative harness, CI determinism gate — implemented, lab validation pending | [#5](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/5) |
-| M5 | GitOps deployment + ops runbook | [#6](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/6) |
+| M5 | GitOps deployment + ops runbook: `scripts/sync-manager.sh` bundle→manager sync (rules/decoders flattened, CDB lists path-preserved, agent groups materialized), ops-health rules (config-check (8,3) audit-rollout signal, sbob-cadence (8,1) image-digest guard), `bundleVersion` manifest field, [docs/runbook.md](docs/runbook.md) with rollout/rollback/triage and the production pilot checklist — implemented, production pilot pending | [#6](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/6) |
 | M6 | Phase 2: Sigma/Sysmon, Velociraptor, MDE, Falco codegen | [#7](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/7) |
 | M7 | Phase 3: enforcement | [#8](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/8) |
 | M8 | SBoB semantic diff gate: scored release deltas (`sbobctl diff`) | [#13](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/13) |
@@ -32,14 +32,17 @@ sbobs/*.yaml ──parse+validate──▶ IR ──lint──▶ codegen ──
    │ wazuh/rules/sbob/<id>_<name>_windows.xml drift rules (Sysmon) │
    │ wazuh/rules/sbob/<id>_<name>_k8s-node.xml drift + attribution │
    │ wazuh/lists/sbob/k8s/podmap        pod uid map (k8s)         │
-   │ wazuh/agent-conf/sbob/<name>-k8s.xml docker-listener wodle   │
+   │ wazuh/agent-conf/sbob/<name>-k8s.xml docker-listener + config-check wodle │
+   │ wazuh/agent-conf/sbob/<name>-audit-digest.sh  digest script │
    │ wazuh/manager/sbob/k8s-api-audit.md  api audit ingestion doc │
    │ <name>.manifest.json              coverage notes               │
    │ checksums.txt                     sha256 inventory             │
    └───────────────────────────────────────────────────────────┘
 ```
 
-Signature rules (M4) invert the model: generic Wazuh rules (audit keys like `sbob-module-load`, `sbob-process-tracing`) fire by default; `rulePolicies.processAllowed` exemptions compile to per-policy CDB lists (`sigexempts/<policy>`) with a `not_match_key` comm condition, and `containerAllowed: true` suppresses the rule entirely. Every bundle manifest carries a machine-generated `coverage` matrix (section × OS with `REASON_CODES`); completeness is asserted at codegen time, and CI adds a twice-run determinism diff plus the attack-suite false-negative check (62 upstream redis attacks ⇒ `docs/attack-matrix.md`).
+Signature rules (M4) invert the model: generic Wazuh rules (audit keys like `sbob-module-load`, `sbob-process-tracing`) fire by default; `rulePolicies.processAllowed` exemptions compile to per-policy CDB lists (`sigexempts/<policy>`) with a `not_match_key` comm condition, and `containerAllowed: true` suppresses the rule entirely. Every bundle manifest carries a machine-generated `coverage` matrix (section × OS with `REASON_CODES`) plus `bundleVersion` (sbob version + image digest); completeness is asserted at codegen time, and CI adds a twice-run determinism diff plus the attack-suite false-negative check (62 upstream redis attacks ⇒ `docs/attack-matrix.md`).
+
+Ops health (M5) closes the loop around the deployed bundle: rule (8,3) config-check keeps firing on any node whose installed sbob audit key-set digest does not match the bundle (audit rules are not hot-deployable — it is the rollout completion signal), and rule (8,1) sbob-cadence alerts when a container starts from the workload image repo with a non-pinned digest. `scripts/sync-manager.sh <bundle>` deploys a bundle into the manager layout and `docs/runbook.md` covers rollout, rollback and alert triage.
 
 Drift detection is allowlist-based: every observed `execve`/`open`/`connect` that is **not** declared in the SBoB raises a Wazuh alert. Allowlists are enforced with CDB list lookups (`not_match_key` / `not_address_match_key`) plus negated PCRE2 alternations for wildcarded entries — see [TDS §5](docs/TDS.md).
 

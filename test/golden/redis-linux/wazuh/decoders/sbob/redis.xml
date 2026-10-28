@@ -45,3 +45,10 @@
     <regex>name=&quot;(\S+)&quot;</regex>
     <order>sbob.path</order>
   </decoder>
+
+  <!-- command-wodle output from sbob-audit-digest.sh: sha256 of the node's installed sbob audit key set (TDS 10.1) -->
+  <decoder name="sbob-redis-config-check">
+    <prematch>^sbob-audit-digest: [0-9a-f]{64}</prematch>
+    <regex>^sbob-audit-digest: ([0-9a-f]{64})</regex>
+    <order>sbob.audit_digest</order>
+  </decoder>

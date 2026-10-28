@@ -18,6 +18,9 @@
     }
   },
   "target": "windows",
+  "sbobVersion": "0.0.4",
+  "imageID": "docker.io/library/redis@sha256:e508c66a2e1d5d5f8d16b1bbf85e6c1c19b9e5c4c5d1e3f7e5a9d7d0f8e3f4d2",
+  "bundleVersion": "sbob-v0.0.4-e508c66a2e1d",
   "files": [
     "wazuh/agent-conf/sbob/redis.xml",
     "wazuh/lists/sbob/redis/egress_addrs",

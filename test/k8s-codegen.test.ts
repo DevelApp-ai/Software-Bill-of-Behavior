@@ -31,6 +31,7 @@ test("redis k8s-node bundle has the documented file structure", () => {
   const paths = redisK8sBundle().files.map((f) => f.path).sort();
   assert.deepEqual(paths, [
     "redis.manifest.json",
+    "wazuh/agent-conf/sbob/redis-audit-digest.sh",
     "wazuh/agent-conf/sbob/redis-k8s.xml",
     "wazuh/audit/sbob/redis.rules",
     "wazuh/decoders/sbob/redis-k8s.xml",

@@ -20,6 +20,7 @@
  *   - wazuh/manager/sbob/k8s-api-audit.md  API-server audit ingestion path
  *                                          (evaluated by the manager-side
  *                                          kubernetes-api-access rule)
+ *   - wazuh/agent-conf/sbob/<name>-audit-digest.sh   node-side digest script (M5)
  *   - <name>.manifest.json                 manifest + coverage matrix (TDS 8)
  *
  * Attribution rules (TDS 6.3, section code 7):
@@ -44,6 +45,16 @@ import { renderDecoder, renderRule, xmlFileHeader } from "./xml.ts";
 import type { BundleFile } from "./linux.ts";
 import { auditDecoders, auditFragmentLines, cdbListFiles, linuxSectionRules } from "./linux.ts";
 import { signatureRulesK8s, signatureRulesShared, signatureCoverageNotes } from "./signatures.ts";
+import {
+  auditKeySetDigest,
+  auditDigestScriptContent,
+  bundleVersion,
+  cadenceNote,
+  cadenceRule,
+  configCheckDecoder,
+  configCheckRule,
+  configCheckWodleBlock,
+} from "./opshealth.ts";
 import { buildCoverageMatrix, assertCoverageComplete } from "../coverage.ts";
 
 const LAB_NOTE =
@@ -55,6 +66,10 @@ export const DOCKER_PARENT_RULE = 87900;
 export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
   const name = ir.workload.name;
   const files: BundleFile[] = [];
+
+  // M5 ops section (TDS 10): config-check digest + sbob-cadence rule
+  const configDigest = auditKeySetDigest(auditFragmentLines(ir).lines);
+  const cadence = cadenceRule(ir, alloc);
 
   // --------------------------------------------------------------------------
   // 1. auditctl fragment (Mode A exe-scoped keys = attribution tier 2)
@@ -103,6 +118,7 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       "to OS_Regex): no lookaheads, no character classes, no bounded quantifiers";
     const decoders: Decoder[] = [
       ...auditDecoders(name, auditKeys),
+      configCheckDecoder(name),
       {
         // cgroup v2/systemd — kubelet escapes uid dashes as underscores: pod<uid_underscores>.scope
         name: `sbob-${name}-audit-cgroup`,
@@ -155,8 +171,11 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       "  <disable_on_start>no</disable_on_start>",
       "</wodle>",
       "",
+      ...configCheckWodleBlock(name),
+      "",
     ].join("\n");
     files.push({ path: `wazuh/agent-conf/sbob/${name}-k8s.xml`, content: xml });
+    files.push({ path: `wazuh/agent-conf/sbob/${name}-audit-digest.sh`, content: auditDigestScriptContent() });
   }
 
   // --------------------------------------------------------------------------
@@ -223,8 +242,12 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
     rules.push(...signatureRulesShared(ir, alloc, rules));
     rules.push(...signatureRulesK8s(ir, alloc, lifecycleRuleId));
 
+    // M5 ops section (TDS 10): config-check (8,3) + sbob-cadence (8,1)
+    rules.push(configCheckRule(ir, alloc, configDigest));
+    if (cadence !== undefined) rules.push(cadence);
+
     const xml = [
-      xmlFileHeader(`sbob drift + attribution + signature rules for workload ${name} — k8s-node target`, name, LAB_NOTE),
+      xmlFileHeader(`sbob drift + attribution + signature + ops rules for workload ${name} — k8s-node target`, name, LAB_NOTE),
       "",
       ...rules.map(renderRule).join("\n\n").split("\n"),
       "",
@@ -259,6 +282,9 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
           {
             workload: ir.workload,
             target: "k8s-node",
+            sbobVersion: ir.workload.sbobVersion,
+            imageID: ir.workload.imageID,
+            bundleVersion: bundleVersion(ir),
             files: files.map((f) => f.path),
             coverage,
             coverageNotes: [
@@ -269,6 +295,11 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
               "k8s: docker-listener lifecycle rule requires the shipped integration ruleset (parent rule 87900)",
               "k8s: DNS-name egress entries are not observable from node auditd telemetry — Windows agents detect them via Sysmon EID 22 (TDS 8)",
               "k8s: manager-side kubernetes-api-access rule (rulePolicies signature) evaluates the API audit log ingested per wazuh/manager/sbob/k8s-api-audit.md",
+              ...(cadenceNote(ir) !== undefined ? [cadenceNote(ir)] : []),
+              "ops: config-check rule (8,3) compares the node digest from the command-wodle script against this bundle; multi-workload nodes see it fire on key-set differences (TDS 10.1)",
+              ...(cadence !== undefined
+                ? ["ops: sbob-cadence rule (8,1) alerts on digest mismatches between running containers and the pinned imageID; tag-only image references are not verifiable from docker events (TDS 10.3)"]
+                : []),
             ],
             labValidation: "pending",
           },
