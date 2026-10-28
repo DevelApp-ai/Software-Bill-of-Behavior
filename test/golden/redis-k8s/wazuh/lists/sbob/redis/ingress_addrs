@@ -1,0 +1,2 @@
+# ingress CDB address list: key=ip/mask (canonicalized), value=identifier
+10.244.0.0/16:app-clients
