@@ -11,12 +11,13 @@ import { lintIR } from "./lint.ts";
 import { makeAllocator, parseRegistry, registryToYaml, slotFor, type SlotRegistry } from "./ruleids.ts";
 import { makeVerifier, type SignatureVerifier } from "./signature.ts";
 import { generateLinuxBundle, type BundleFile } from "./codegen/linux.ts";
+import { generateWindowsBundle } from "./codegen/windows.ts";
 import type { IR } from "./types.ts";
 
 export interface TranspileOptions {
   registryPath: string;
   outDir: string;
-  target: "linux";
+  target: "linux" | "windows";
   skipSignatureVerify: boolean;
   confirmNone: string[];
 }
@@ -71,7 +72,10 @@ export async function transpile(sbobPaths: string[], opts: TranspileOptions): Pr
   for (const ir of irs) {
     const slot = slotFor(ir.workload.name, registry);
     const alloc = makeAllocator(ir.workload.name, slot);
-    const files = opts.target === "linux" ? generateLinuxBundle(ir, alloc) : [];
+    const files =
+      opts.target === "linux"
+        ? generateLinuxBundle(ir, alloc)
+        : generateWindowsBundle(ir, alloc);
     for (const f of files) allFiles.push(f);
     workloads.push({ name: ir.workload.name, slot, files: files.map((f) => f.path) });
   }

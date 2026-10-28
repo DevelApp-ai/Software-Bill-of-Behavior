@@ -9,7 +9,7 @@ Monitor **Linux**, **Windows**, and **Kubernetes** deployments from one declared
 | Milestone | Scope | Issue |
 | --- | --- | --- |
 | M1 | Transpiler core: SBoB YAML parser, validator, IR, linter, deterministic rule-ID allocation, PCRE2 wildcard compiler, Linux/k8s-node codegen | [#2](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/2) |
-| M2 | Windows Sysmon codegen | [#3](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/3) |
+| M2 | Windows Sysmon codegen (EIDs 1/3/11/22; args-drift heuristic, opens file-create partial) — implemented, lab validation pending | [#3](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/3) |
 | M3 | Kubernetes attribution | [#4](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/4) |
 | M4 | rulePolicies + coverage manifest + CI gates | [#5](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/5) |
 | M5 | GitOps deployment + ops runbook | [#6](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/6) |
@@ -22,12 +22,14 @@ Monitor **Linux**, **Windows**, and **Kubernetes** deployments from one declared
 sbobs/*.yaml ──parse+validate──▶ IR ──lint──▶ codegen ──▶ wazuh bundle
                                               │
    ┌──────────────────────────────────────────┴──────────────┐
-   │ wazuh/audit/sbob/<name>.rules      auditctl fragment      │
-   │ wazuh/lists/sbob/<name>/*         CDB allowlists          │
-   │ wazuh/decoders/sbob/<name>.xml     custom decoder chain   │
-   │ wazuh/rules/sbob/<id>_<name>_linux.xml   drift rules      │
-   │ <name>.manifest.json              coverage notes          │
-   │ checksums.txt                     sha256 inventory        │
+   │ wazuh/audit/sbob/<name>.rules      auditctl fragment (linux)  │
+   │ wazuh/agent-conf/sbob/<name>.xml   eventchannel (windows)    │
+   │ wazuh/lists/sbob/<name>/*         CDB allowlists             │
+   │ wazuh/decoders/sbob/<name>.xml     custom decoder chain (linux) │
+   │ wazuh/rules/sbob/<id>_<name>_linux.xml   drift rules          │
+   │ wazuh/rules/sbob/<id>_<name>_windows.xml drift rules (Sysmon) │
+   │ <name>.manifest.json              coverage notes               │
+   │ checksums.txt                     sha256 inventory             │
    └───────────────────────────────────────────────────────────┘
 ```
 
@@ -38,8 +40,11 @@ Drift detection is allowlist-based: every observed `execve`/`open`/`connect` tha
 Requires Node.js ≥ 22 (uses native TypeScript type stripping; **zero npm dependencies**).
 
 ```sh
-# transpile a workload into a Wazuh bundle
+# transpile a workload into a Wazuh bundle (linux target)
 node src/cli.ts transpile --sbob sbobs/redis.yaml --out dist/bundle --registry docs/sbob-registry.yaml --skip-signature-verify
+
+# windows target (Sysmon EIDs 1/3/11/22; requires Wazuh >= 4.4 and the shipped ruleset parent rule 61600)
+node src/cli.ts transpile --sbob sbobs/redis.yaml --out dist/bundle-win --target windows --registry docs/sbob-registry.yaml --skip-signature-verify
 
 # schema-validate only
 node src/cli.ts validate --sbob sbobs/redis.yaml
@@ -64,4 +69,4 @@ scripts/                golden regeneration + wazuh-logtest lab harness
 
 ## Lab validation
 
-Generated bundles carry a `LAB VALIDATION PENDING` banner until validated against a live Wazuh manager. Run `scripts/logtest-corpus.sh` on a lab manager with the bundle installed: the benign corpus must stay silent and the drift corpus must fire rules 100011/100021/100031.
+Generated bundles carry a `LAB VALIDATION PENDING` banner until validated against a live Wazuh manager. Run `scripts/logtest-corpus.sh` (linux) or `scripts/logtest-corpus.sh windows` on a lab manager with the bundle installed: the benign corpus must stay silent and the drift corpus must fire the mapped drift rules (linux: 100011/100021/100031; windows: 100016/100006/100026/100036/100007).

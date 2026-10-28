@@ -10,29 +10,35 @@
  * byte diff of every Wazuh artifact.
  */
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseYaml } from "../src/yaml.ts";
 import { validateSbob } from "../src/schema.ts";
 import { buildIR } from "../src/ir.ts";
 import { makeAllocator, parseRegistry } from "../src/ruleids.ts";
 import { generateLinuxBundle } from "../src/codegen/linux.ts";
+import { generateWindowsBundle } from "../src/codegen/windows.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const sbobPath = join(root, "sbobs/redis.yaml");
 const registryPath = join(root, "docs/sbob-registry.yaml");
-const outDir = join(root, "test/golden/redis-linux");
 
 const raw = readFileSync(sbobPath, "utf8");
 const parsed = parseYaml(raw);
 const ir = buildIR(validateSbob(parsed), parsed);
 const slot = parseRegistry(readFileSync(registryPath, "utf8")).slots.get("redis") ?? 0;
-const files = generateLinuxBundle(ir, makeAllocator("redis", slot));
 
-rmSync(outDir, { recursive: true, force: true });
-for (const f of files) {
-  const dest = join(outDir, f.path);
-  mkdirSync(dirname(dest), { recursive: true });
-  writeFileSync(dest, f.content);
+const bundles: Array<{ dir: string; files: ReturnType<typeof generateLinuxBundle> }> = [
+  { dir: join(root, "test/golden/redis-linux"), files: generateLinuxBundle(ir, makeAllocator("redis", slot)) },
+  { dir: join(root, "test/golden/redis-windows"), files: generateWindowsBundle(ir, makeAllocator("redis", slot)) },
+];
+
+for (const bundle of bundles) {
+  rmSync(bundle.dir, { recursive: true, force: true });
+  for (const f of bundle.files) {
+    const dest = join(bundle.dir, f.path);
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, f.content);
+  }
+  console.log(`wrote ${bundle.files.length} golden files under ${relative(root, bundle.dir)}`);
 }
-console.log(`wrote ${files.length} golden files under test/golden/redis-linux`);

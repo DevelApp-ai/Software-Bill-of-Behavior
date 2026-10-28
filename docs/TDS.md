@@ -1,6 +1,6 @@
 # SBoB → Wazuh Transpiler — Technical Design Specification
 
-**Version:** 1.1-draft · **Date:** 2026-10-28 · **Status:** Proposed (M1 implementation deviations folded in)
+**Version:** 1.2-draft · **Date:** 2026-10-28 · **Status:** Proposed (M1 + M2 implementation deviations folded in)
 **Author:** Detection Engineering (DevelApp)
 **Source standard:** Software Bill of Behavior (SBoB), spec v0.0.4 ([spec](https://billofbehavior.com/bob/docs/spec/), [repo](https://github.com/k8sstormcenter/bob))
 **Target platform (Phase 1):** Wazuh 4.x — Windows hosts, Linux hosts, Kubernetes nodes
@@ -173,7 +173,7 @@ Per documented Wazuh–Sysmon practice, each Windows agent in a monitored group 
 </localfile>
 ```
 
-Sysmon (Sysinternals) with a curated config (e.g. SwiftOnSecurity-derived, trimmed to EIDs 1/3/10/11/22) is a deployment prerequisite, verified by a Wazuh inventory rule (alert if a monitored agent lacks Sysmon).
+Sysmon (Sysinternals) with a curated config (e.g. SwiftOnSecurity-derived, trimmed to EIDs 1/3/10/11/22) is a deployment prerequisite. Rule-based absence detection is not possible (an agent without Sysmon emits no Sysmon events), so the bundle emits an informational health rule on Sysmon EID 4 (service state change) and the definitive inventory check — alert if a monitored agent lacks Sysmon — is an ops runbook item (M5), using agent inventory data. The generated rules additionally require the shipped Wazuh ruleset entry rule `61600` (`0595-win-sysmon_rules.xml`) and Wazuh ≥ 4.4.
 
 ### 4.4 Kubernetes collection
 
@@ -270,6 +270,7 @@ rule_id = 100000
 - **Variant digit layout (as implemented; this replaces the original `…0` Linux / `…1` Windows / `…2` k8s sketch):**
   - `0–4` — **Linux / Kubernetes-node** rule kinds: `0` base, `1` drift, `2` sustained-drift escalation, `3` informational, `4` exemption. Linux and k8s-node share this band because k8s nodes run the Linux agent.
   - `5–9` — **Windows** rule kinds: `5` base, `6` drift, `7` sustained-drift escalation, `8` informational, `9` exemption. Windows gets its own band so a workload's Windows and Linux rules for the same section never collide within one slot.
+- **Windows secondary-drift allocation (as implemented in M2; amends the sketch above):** execs needs two drift rules (image + args) and egress needs two (ip/port + DNS-name), but a section's variant budget allows one rule per kind. The **base section (code 0)** therefore hosts the secondary drift rules: `(0,6)` = execs args drift (§7.3.4), `(0,7)` = egress DNS-name drift (EID 22); `(0,8)` = Sysmon-prerequisite health (EID 4 informational), `(0,5)` = the global Windows base (chains off shipped rule `61600`).
 
 ### 6.2 Rule hierarchy (per workload)
 
@@ -296,6 +297,9 @@ rule_id = 100000
 
 Notes:
 
+- **PCRE2 hard requirement in `<field>` (engine-verified, M2):** Wazuh `analysisd` compiles rule `<field>` conditions with **OS_Regex by default**; PCRE2 syntax requires the explicit `type="pcre2"` attribute on the `<field>` element (`wazuh/src/analysisd/rules.c`, `Rules_OP_ReadRules` → `w_check_attr_type`; default `EXP_TYPE_OSREGEX`), available since Wazuh 4.4. Every sbobctl-generated field condition therefore carries `type="pcre2"` — character classes (`[^/]+`) and the negated lookaheads would otherwise fail ruleset load.
+- **Windows CDB deviation:** Windows drive-letter paths (`C:\…`) cannot be CDB keys (`:` is the key/value separator), so the Windows target compiles execs/opens allowlists as PCRE2 alternations in the rules XML instead of CDB lists; address lists (IPv4/CIDR, canonicalized IPv6) remain CDB `address_match_key` lookups.
+- **Sysmon `QueryName` normalization (M2):** SBoB `dnsNames` are canonical DNS zone forms (trailing dot); Sysmon EID 22 `QueryName` carries the hostname **without** the trailing dot, so the Windows DNS drift fragment compiles from the stripped spelling. The Linux path keeps the canonical trailing-dot form for M4 DNS ingestion.
 - **Both** the CDB `not_match_key` and the negated-pattern regex must match (AND) ⇒ alert only when the exe is neither an exact nor pattern allowlist member.
 - `level="9"` (default drift severity). Alert fields (`sbob.workload`, `sbob.pod`, imageID) are attached by the base rule / decoders so every drift alert carries full context.
 - `rulePolicies` **signature rules** invert this: the generic Wazuh rule (e.g. `sbob-module-load`) fires by default; a child rule at `level="0"` with `<if_sid>` + `comm` match on `processAllowed[]` suppresses when the actor is exempt. `containerAllowed: true` ⇒ the transpiler does not emit the rule for that workload at all (per spec §4.8: must not be treated as a deny).
@@ -507,7 +511,7 @@ stateDiagram-v2
 | # | Milestone | Exit criteria |
 |---|---|---|
 | M1 | IR + linter + Linux codegen (execs/opens/egress) | golden tests green; `wazuh-logtest` corpus passes on a lab node |
-| M2 | Windows codegen (Sysmon EIDs 1/3/22) | same, on a lab Windows host with Sysmon |
+| M2 | Windows codegen (Sysmon EIDs 1/3/11/22; opens = file-create partial) | same, on a lab Windows host with Sysmon (`scripts/logtest-corpus.sh windows`) |
 | M3 | K8s attribution (Mode A default; cgroup decoder stretch) | redis attack suite matrix published |
 | M4 | rulePolicies signature rules + coverage manifest + CI gates | full §8 matrix machine-generated |
 | M5 | Deploy-repo GitOps flow + ops runbook | production pilot on one workload |

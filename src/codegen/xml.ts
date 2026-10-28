@@ -35,7 +35,12 @@ export function renderRule(rule: XmlRule): string {
   if (rule.ifGroup !== undefined) lines.push(`    <if_group>${esc(rule.ifGroup)}</if_group>`);
   if (rule.match !== undefined) lines.push(`    <match>${esc(rule.match)}</match>`);
   for (const f of rule.fields ?? []) {
-    lines.push(`    <field name="${esc(f.name)}">${esc(f.regex)}</field>`);
+    // Wazuh analysisd compiles <field> conditions with OS_Regex unless the
+    // element carries type="pcre2" (wazuh/src/analysisd/rules.c, Rules_OP_ReadRules
+    // -> w_check_attr_type; default EXP_TYPE_OSREGEX). Every sbobctl field
+    // condition uses PCRE2 constructs (character classes, lookaheads), so the
+    // attribute is mandatory: without it the ruleset fails to load.
+    lines.push(`    <field name="${esc(f.name)}" type="pcre2">${esc(f.regex)}</field>`);
   }
   if (rule.list !== undefined) {
     lines.push(`    <list field="${esc(rule.list.field)}" lookup="${esc(rule.list.lookup)}">${esc(rule.list.src)}</list>`);
