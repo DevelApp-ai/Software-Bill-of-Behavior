@@ -1,0 +1,13 @@
+{
+  "egress": [
+    {
+      "peers": [
+        { "ipBlock": { "cidr": "10.96.0.10/32" } }
+      ],
+      "ports": [
+        { "protocol": "UDP", "port": 53 }
+      ]
+    }
+  ],
+  "ingress": []
+}

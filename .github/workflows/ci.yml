@@ -28,6 +28,17 @@ jobs:
         run: node scripts/attack-false-negative-check.ts
       - name: Engine blind-spot matrix gate (TDS 13, M6)
         run: node scripts/engine-matrix-check.ts
+      - name: Enforce determinism gate — twice-run byte diff, all 3 enforce targets (TDS 14, M7)
+        run: |
+          for target in linux windows k8s-node; do
+            rm -rf /tmp/enf1 /tmp/enf2
+            node src/cli.ts enforce --sbob sbobs/redis.yaml --state test/enforce-fixtures/redis-enforce.state.yaml --out /tmp/enf1 --target "$target" --skip-signature-verify
+            node src/cli.ts enforce --sbob sbobs/redis.yaml --state test/enforce-fixtures/redis-enforce.state.yaml --out /tmp/enf2 --target "$target" --skip-signature-verify
+            diff -r /tmp/enf1 /tmp/enf2
+            echo "enforce determinism OK: $target"
+          done
+          node src/cli.ts enforce --sbob sbobs/redis.yaml --state test/enforce-fixtures/redis-enforce.state.yaml --out /tmp/enf3 --target linux --skip-signature-verify
+          node src/cli.ts enforce --sbob sbobs/redis.yaml --state test/enforce-fixtures/redis-bad-enforce.state.yaml --out /tmp/enf4 --target linux --skip-signature-verify && exit 1 || echo "state gate OK: enforce without audit record rejected"
       - name: Diff-gate determinism + golden report + verdict exit codes (TDS 16, M8)
         run: |
           node src/cli.ts diff --old test/diffgate-fixtures/base.yaml --new test/diffgate-fixtures/drifted.yaml --report /tmp/dg1.json > /tmp/dg1.md || dg_exit=$?

@@ -14,6 +14,9 @@
 #                                   (concatenated with <n>-k8s.xml when both exist;
 #                                   multiple wodle blocks are valid side-by-side)
 #   wazuh/agent-conf/sbob/<n>-audit-digest.sh → $ROOT/etc/shared/sbob-<n>/
+#   wazuh/active-response/bin/*.sh → $ROOT/active-response/bin/ (M7 —
+#                                   manager copy = distribution source; the
+#                                   agent rollout is in runbook §9)
 #   wazuh/manager/**, manifests, checksums     → informational, not deployed
 #
 # The manager reloads rules/decoders/lists on restart (wazuh-control restart).
@@ -57,6 +60,7 @@ RULES="$BUNDLE/wazuh/rules/sbob"
 DECODERS="$BUNDLE/wazuh/decoders/sbob"
 LISTS="$BUNDLE/wazuh/lists"
 AGENTCONF="$BUNDLE/wazuh/agent-conf/sbob"
+ARBIN="$BUNDLE/wazuh/active-response/bin"
 
 # 1. rules + decoders: flatten (the Wazuh loader does not recurse)
 if [ -d "$RULES" ]; then
@@ -110,6 +114,16 @@ if [ -d "$AGENTCONF" ]; then
   for f in "$AGENTCONF"/*.sh; do
     [ -e "$f" ] || continue
     cp_deploy "$f" "$ROOT/etc/shared/sbob-$(basename "$f" | sed 's/-audit-digest\.sh$//')/$(basename "$f")"
+  done
+fi
+
+# 3b. active-response scripts (M7, TDS 14.1): the manager's copy is the
+#     distribution source; agents fetch them per the runbook §9 rollout
+#     (they are NOT hot-deployable via agent.conf)
+if [ -d "$ARBIN" ]; then
+  for f in "$ARBIN"/*.sh; do
+    [ -e "$f" ] || continue
+    cp_deploy "$f" "$ROOT/active-response/bin/$(basename "$f")"
   done
 fi
 

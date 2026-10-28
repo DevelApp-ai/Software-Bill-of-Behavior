@@ -1,0 +1,23 @@
+# M7 test fixture — execs/egress/ingress graduated to Enforce after an
+# incident-free audit window (windowDays: 14, incidents: 0); opens stays at
+# the file default (audit). The ladder is respected: no section skips rungs.
+workload: redis
+state: audit
+sections:
+  execs: enforce
+  opens: audit
+  egress: enforce
+  ingress: enforce
+auditRecords:
+  execs:
+    started: "2026-10-01"
+    windowDays: 14
+    incidents: 0
+  egress:
+    started: "2026-10-01"
+    windowDays: 14
+    incidents: 0
+  ingress:
+    started: "2026-10-01"
+    windowDays: 14
+    incidents: 0

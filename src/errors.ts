@@ -12,7 +12,9 @@ export type SbobErrorCode =
   | "ERR_NONE_UNCONFIRMED"
   | "ERR_MISSING_SCOPE"
   | "ERR_SECTION_CAP"
-  | "ERR_YAML_PARSE";
+  | "ERR_YAML_PARSE"
+  | "ERR_ENFORCE_STATE_INVALID"
+  | "ERR_ENFORCE_NOT_AUDITED";
 
 export class SbobError extends Error {
   readonly code: SbobErrorCode;

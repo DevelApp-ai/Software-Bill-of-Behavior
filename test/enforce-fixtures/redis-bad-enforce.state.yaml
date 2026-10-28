@@ -1,0 +1,6 @@
+# M7 test fixture — NEGATIVE: execs is in enforce state without an audit
+# record. parseEnforceState must fail with ERR_ENFORCE_NOT_AUDITED.
+workload: redis
+state: audit
+sections:
+  execs: enforce

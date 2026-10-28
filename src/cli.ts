@@ -19,6 +19,7 @@ import { validateSbob } from "./schema.ts";
 import { buildIR } from "./ir.ts";
 import { lintIR } from "./lint.ts";
 import { transpile } from "./transpile.ts";
+import { runEnforce } from "./enforce.ts";
 import { diffSbobs, formatDiffReport, type GateVerdict } from "./diffgate.ts";
 
 function usage(): never {
@@ -28,6 +29,9 @@ commands:
   transpile  generate a Wazuh detection bundle from one or more SBoB files
   validate   parse, schema-check and lint an SBoB without emitting artifacts
   diff       semantic SBoB release diff with scored delta ladder (M8)
+  enforce    generate the Phase-3 enforcement bundle from an SBoB + rollout
+             state file (seccomp/AppArmor/NetworkPolicy/AppLocker + active
+             responses, Monitor->Audit->Enforce gated, M7)
 
 options:
   --sbob <path>                 SBoB YAML file (repeatable for transpile)
@@ -37,6 +41,8 @@ options:
                                  sigma / velociraptor / mde / falco (M6, TDS 13)
   --skip-signature-verify       skip SBoB signature verification (development profiles only)
   --confirm-none <section,...>  accept explicitly-empty (NONE) sections
+  --state <path>                 (enforce) per-workload rollout state file (TDS 14)
+  --enforced-np <path>           (enforce) peers JSON of the live NetworkPolicy (np-diff, TDS 14.4)
   --old <path>                  (diff) prior-release SBoB YAML
   --new <path>                  (diff) next-release SBoB YAML
   --report <path>               (diff) write the machine-readable JSON delta report here
@@ -64,6 +70,8 @@ interface Args {
   failOn: string;
   namespaces: string[];
   internalSuffixes: string[];
+  statePath: string;
+  enforcedNpPath: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -81,6 +89,8 @@ function parseArgs(argv: string[]): Args {
     failOn: "mandatory",
     namespaces: [],
     internalSuffixes: [],
+    statePath: "",
+    enforcedNpPath: "",
   };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
@@ -104,6 +114,8 @@ function parseArgs(argv: string[]): Args {
       if (args.failOn !== "none" && args.failOn !== "advisory" && args.failOn !== "mandatory") usage();
     } else if (a === "--namespace") args.namespaces.push(next());
     else if (a === "--internal-suffix") args.internalSuffixes.push(next());
+    else if (a === "--state") args.statePath = next();
+    else if (a === "--enforced-np") args.enforcedNpPath = next();
     else {
       console.error(`unknown option: ${a}`);
       usage();
@@ -169,6 +181,38 @@ async function main(): Promise<void> {
       console.log(formatDiffReport(result));
       const failRank = args.failOn === "none" ? Number.POSITIVE_INFINITY : args.failOn === "advisory" ? 1 : 2;
       if (verdictRank(result.verdict) >= failRank) {
+        exit(1);
+      }
+    } else if (args.command === "enforce") {
+      if (args.sbob.length !== 1) usage();
+      if (args.statePath === "") usage();
+      const ENFORCE_TARGETS = ["linux", "windows", "k8s-node"] as const;
+      if (!(ENFORCE_TARGETS as readonly string[]).includes(args.target)) {
+        console.error(`target "${args.target}" is not available (enforce targets: ${ENFORCE_TARGETS.join(", ")})`);
+        exit(2);
+      }
+      const result = await runEnforce(args.sbob[0] as string, {
+        registryPath: args.registry,
+        outDir: args.out,
+        target: args.target as "linux" | "windows" | "k8s-node",
+        statePath: args.statePath,
+        enforcedNpPath: args.enforcedNpPath,
+        skipSignatureVerify: args.skipSignatureVerify,
+        confirmNone: args.confirmNone,
+      });
+      console.log(`workload ${result.workload} (slot ${result.slot}): ${result.files.length} files`);
+      for (const f of result.files) console.log(`  ${f}`);
+      if (result.enforcing.length > 0) {
+        console.log(`enforcing sections: ${result.enforcing.join(", ")}`);
+      } else {
+        console.log("enforcing sections: none (monitor/audit only)");
+      }
+      if (result.registryUpdated) {
+        console.log("registry updated; commit the new docs/sbob-registry.yaml:");
+        console.log(result.registryYaml);
+      }
+      if (result.npDrift > 0) {
+        console.error(`np-diff: ${result.npDrift} drifted NetworkPolicy rules`);
         exit(1);
       }
     } else {

@@ -1,0 +1,6 @@
+# M7 test fixture — redis in global Audit state, no per-section overrides.
+# Every section is effectively "audit": enforcement artifacts are generated in
+# audit form (seccomp SCMP_ACT_LOG, NetworkPolicy annotation mode: audit,
+# AppArmor complain, AppLocker AuditMode, active responses disabled).
+workload: redis
+state: audit
