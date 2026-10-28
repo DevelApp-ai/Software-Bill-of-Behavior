@@ -18,6 +18,7 @@ import { buildIR } from "../src/ir.ts";
 import { makeAllocator, parseRegistry } from "../src/ruleids.ts";
 import { generateLinuxBundle } from "../src/codegen/linux.ts";
 import { generateWindowsBundle } from "../src/codegen/windows.ts";
+import { generateK8sNodeBundle } from "../src/codegen/k8s.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const sbobPath = join(root, "sbobs/redis.yaml");
@@ -31,6 +32,7 @@ const slot = parseRegistry(readFileSync(registryPath, "utf8")).slots.get("redis"
 const bundles: Array<{ dir: string; files: ReturnType<typeof generateLinuxBundle> }> = [
   { dir: join(root, "test/golden/redis-linux"), files: generateLinuxBundle(ir, makeAllocator("redis", slot)) },
   { dir: join(root, "test/golden/redis-windows"), files: generateWindowsBundle(ir, makeAllocator("redis", slot)) },
+  { dir: join(root, "test/golden/redis-k8s"), files: generateK8sNodeBundle(ir, makeAllocator("redis", slot)) },
 ];
 
 for (const bundle of bundles) {

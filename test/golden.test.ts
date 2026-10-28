@@ -8,6 +8,7 @@ import { buildIR } from "../src/ir.ts";
 import { makeAllocator } from "../src/ruleids.ts";
 import { generateLinuxBundle } from "../src/codegen/linux.ts";
 import { generateWindowsBundle } from "../src/codegen/windows.ts";
+import { generateK8sNodeBundle } from "../src/codegen/k8s.ts";
 
 /** Recursively map relative path -> content under a directory. */
 function snapshot(dir: string, base = ""): Map<string, string> {
@@ -52,4 +53,9 @@ test("regenerated linux bundle is byte-identical to the committed golden (run sc
 test("regenerated windows bundle is byte-identical to the committed golden (run scripts/regen-golden.ts after intentional changes)", () => {
   checkGolden(join(import.meta.dirname, "golden/redis-windows"),
     generateWindowsBundle(redisIR(), makeAllocator("redis", 0)));
+});
+
+test("regenerated k8s bundle is byte-identical to the committed golden (run scripts/regen-golden.ts after intentional changes)", () => {
+  checkGolden(join(import.meta.dirname, "golden/redis-k8s"),
+    generateK8sNodeBundle(redisIR(), makeAllocator("redis", 0)));
 });

