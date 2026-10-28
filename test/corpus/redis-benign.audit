@@ -1,0 +1,19 @@
+# Benign events: fully inside the redis SBoB. None of these should fire an
+# sbob drift rule (expected rule ids: only the level-0 base chain).
+
+type=SYSCALL msg=audit(1699999900.100:1001): arch=c000003e syscall=59 success=yes exit=0 a0=0x1b5a2f7d5e80 a1=0x1b5a2f7d5e88 a2=0x1b5a2f7d5e90 items=2 ppid=1 pid=2001 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="redis-server" exe="/usr/bin/redis-server" subj=unconfined key="sbob-exec-redis"
+type=EXECVE msg=audit(1699999900.100:1001): argc=1 a0="/usr/bin/redis-server"
+
+type=SYSCALL msg=audit(1699999901.200:1002): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2001 pid=2002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-exec-redis"
+type=EXECVE msg=audit(1699999901.200:1002): argc=2 a0="/bin/sh" a1="-c"
+
+type=SYSCALL msg=audit(1699999902.300:1003): arch=c000003e syscall=257 success=yes exit=3 items=1 ppid=2001 pid=2003 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="redis-server" exe="/usr/bin/redis-server" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999902.300:1003): item=0 name="/data/redis/appendonly.aof" inode=1701437 dev=fd:01 mode=0100644 ouid=999 ogid=999 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999903.400:1004): arch=c000003e syscall=257 success=yes exit=4 items=1 ppid=2001 pid=2004 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="redis-server" exe="/usr/bin/redis-server" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999903.400:1004): item=0 name="/etc/resolv.conf" inode=14437 dev=fd:01 mode=0100644 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999904.500:1005): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=2001 pid=2005 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="redis-server" exe="/usr/bin/redis-server" subj=unconfined key="sbob-connect-redis"
+type=SOCKADDR msg=audit(1699999904.500:1005): saddr=020000350A60000A0000000000000000
+type=SYSCALL msg=audit(1699999905.600:1006): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=2001 pid=2006 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="redis-server" exe="/usr/bin/redis-server" subj=unconfined key="sbob-connect-redis"
+type=SOCKADDR msg=audit(1699999905.600:1006): saddr=020001BBA200D9AB0000000000000000

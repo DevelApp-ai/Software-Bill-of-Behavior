@@ -1,0 +1,2 @@
+# opens allowlist: key=path, value=flag bitmask (TDS 6.4); wildcard entries live in the rules XML
+/etc/resolv.conf:1
