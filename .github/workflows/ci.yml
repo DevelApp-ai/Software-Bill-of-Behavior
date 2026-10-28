@@ -40,6 +40,23 @@ jobs:
           node src/cli.ts diff --old test/diffgate-fixtures/base.yaml --new test/diffgate-fixtures/base.yaml > /tmp/dg0.md
           grep -q "No scored behavior changes" /tmp/dg0.md
           echo "diff gate OK: deterministic, golden, verdict + exit codes"
+      - name: Profiler determinism + goldens + taint/gate exit codes (TDS 17, M9)
+        run: |
+          prof_image="docker.io/legacy/cache@sha256:c0ffee00000000000000000000000000000000000000000000000000000000ff"
+          node src/cli.ts profile --events test/profiler-fixtures/events.jsonl --workload legacy-cache --image "$prof_image" --k8s-namespace legacy-tier --out-dir /tmp/prof1 --dispositions test/profiler-fixtures/dispositions.json --baseline test/profiler-fixtures/baseline.yaml > /tmp/prof1.md
+          node src/cli.ts profile --events test/profiler-fixtures/events.jsonl --workload legacy-cache --image "$prof_image" --k8s-namespace legacy-tier --out-dir /tmp/prof2 --dispositions test/profiler-fixtures/dispositions.json --baseline test/profiler-fixtures/baseline.yaml > /tmp/prof2.md
+          diff /tmp/prof1.md /tmp/prof2.md
+          diff -r /tmp/prof1 /tmp/prof2
+          diff /tmp/prof1/legacy-cache.candidate.yaml test/profiler-fixtures/expected-candidate.yaml
+          diff /tmp/prof1/legacy-cache.provenance.json test/profiler-fixtures/expected-provenance.json
+          grep -q "status: \*\*CANDIDATE\*\*" /tmp/prof1.md
+          grep -q "Odd behaviors" /tmp/prof1.md
+          grep -q MANDATORY /tmp/prof1.md
+          node src/cli.ts profile --events test/profiler-fixtures/events.jsonl --workload legacy-cache --image "$prof_image" --k8s-namespace legacy-tier --out-dir /tmp/prof3 --incident legacy-cache > /tmp/prof3.md || taint_exit=$?
+          test "$taint_exit" = 1
+          test ! -f /tmp/prof3/legacy-cache.candidate.yaml
+          grep -q "Quarantined" /tmp/prof3.md
+          echo "profiler OK: deterministic, goldens, gate + taint exit codes"
 
   typecheck:
     runs-on: ubuntu-latest

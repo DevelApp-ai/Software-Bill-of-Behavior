@@ -548,7 +548,7 @@ stateDiagram-v2
 | M6 | Phase 2 codegen (Sigma, Velociraptor, MDE, Falco) | per-engine blind-spot matrix **delivered** (`docs/engine-matrix.md` machine-checked in CI, `scripts/engine-matrix-check.ts`; Sigma/Velociraptor/MDE/Falco targets implemented, Envoy `endpoints[]` ingestion closed on k8s); lab validation pending |
 | M7 | Phase 3 enforcement behind state machine | enforcement pilot in Audit mode |
 | M8 | SBoB semantic diff gate — scored release deltas (`sbobctl diff`, §16) | fixture pair Δ = 45 mandatory + immediate review; golden JSON committed; CI determinism/verdict step |
-| M9 | Release profiler — observed vs declared behavior redraft assist (§17) | profile schema agreed; redraft proposal prototype on one workload |
+| M9 | Observability bootstrap profiler — candidate SBoBs from telemetry (`sbobctl profile`, §17) | profile schema agreed; redraft proposal prototype on one workload — **code delivered** (candidate + provenance sidecar, disposition taxonomy, taint, M8 gate integration; golden fixtures; lab validation on the shared Wazuh lab pending) |
 
 ---
 
@@ -600,9 +600,52 @@ The machine-readable JSON report (`--report`) and the markdown report (stdout) a
 
 ---
 
-## 17. M9 — Release profiler (outline)
+## 17. M9 — Observability bootstrap profiler (derive candidate SBoBs from telemetry)
 
-The profiler closes the M8 gap: compare *observed* behavior (Wazuh alert history for the workload: drift hits, benign silence, signature-rule fires) against the *declared* SBoB over a release window, and propose redrafts: undeclared-but-benign events become candidate entries for the next SBoB; declared-but-never-observed entries become prune candidates; persistent drift on one path is promoted to an explicit review. Output is a proposal document, never an automatic manifest edit — every redraft goes through the diff gate (§16) and human sign-off. Tracked in [#14](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/14).
+The profiler is the fallback for software that ships no contract: it derives a **candidate SBoB with provenance** from an observation window over normalized `sbob.*` telemetry, so a human reviews and signs a draft contract instead of hand-writing behavioral contracts for vendor-less workloads. Grounded in the field-guide chapter *Observed Behavior to Declared Intent — Bootstrapping an SBoB from Telemetry*. Tracked in [#14](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/14).
+
+The output is a proposal, never an automatic manifest edit: the candidate ships through a draft PR whose reviewed delta flows through the M8 gate (§16) and a human signature. **Observation, laundered into declaration, is the open risk; the gap between the two is the human signature.**
+
+### 17.1 Input contract — the same field plane the detector uses
+
+`sbobctl profile --events <events.jsonl> --workload <name> --image <imageID>` consumes a **normalized event stream** (JSONL, one event per line): `ts` (ISO 8601 UTC — day boundaries are UTC by construction), `workload`, `source`, `kind` and the `sbob.*` field mapping the drift decoders already emit (`sbob.exe`, `sbob.path`, `sbob.dst_ip`/`sbob.dst_port`, `sbob.src_ip`, `sbob.cap`…). Raw logs are rejected by construction — the recorder sits behind the same decoders, pointed at a window instead of a ruleset, so **every derived entry is by construction verifiable by the detector that will enforce it**. Event kinds map to sections: `exec` → `execs[]`, `open` → `opens[]`, `connect` → `egress[]`, `accept` → `ingress[]`, `cap` → `capabilities[]`; `note` events (annotation-only sources) annotate the review.
+
+The **fidelity ladder** decides what may confirm an entry: kernel/runtime telemetry (`auditd`, `sysmon`, `ebpf`) is the mandatory floor and the only confirming source; `dns`/`flow`/`tracemap` are partial (suggest, never confirm); `applog`/`metric` are annotation-only. An entry never seen by a confirming source is marked **unverified and excluded from the candidate** — an allowlist the enforcement plane cannot see is a decoration.
+
+### 17.2 Clustering and frequency classification
+
+Events cluster per workload × section into entry keys (exact `exe` path; `opens` path with the union of observed flags — flagless events default read-only and are noted; `ip:`/`dns:` egress peers with their observed ports; ingress source IPs; capability tokens). **Derived entries are exact in v1 — no wildcards: widening a pattern is a human reviewer's call, not a derivation output.** Execs with a single stable arg vector carry `args`; varying args emit path-only entries with the variance in provenance.
+
+Every cluster is classified (deterministic ladder, thresholds calibratable via `--steady-cutoff`/`--sporadic-cutoff`/`--cadence-tolerance`):
+
+| Class | Rule (defaults) | Disposition |
+|---|---|---|
+| **steady** | seen on ≥ 50% of the window's days | declare — provenance attached |
+| **periodic** | ≥ 3 days on a regular cadence (median day gap ≥ 2, all gaps within ±25%); the entry carries its period | declare **after one full period** — enforced: if `windowDays < 2 × period`, the entry is held |
+| **sporadic** | recurs (count > 1), no cadence; anything below the 5% sporadic-day cutoff is sporadic regardless | hold the window one more cycle; **exempt-with-expiry** if drift fires meanwhile |
+| **one-off** | a single observation | **investigate** → exclude-and-document, or declare with a written reason |
+
+"Every day" is steady, not periodic — periodic is reserved for a cadence longer than daily. Classification is day-based (UTC), so the window's length — written on the candidate — is the honesty anchor: **an SBoB derived from an N-day window is exactly what that workload did for N days, no more.** The window must span the slowest legitimate cadence plus one full drill cycle; the drift loop (§3 of the runtime-intent contract) catches what the window missed by construction — that is the designed fallback, not a pipeline failure.
+
+### 17.3 Dispositions: no "no decision" states
+
+Every clustered entry carries a mandatory disposition — `declare` (enters the candidate), `hold` (excluded; revisit next window), `exempt-with-expiry` (enters with a future expiry date in the provenance sidecar; auto-cleans), `investigate` (excluded until explained). Taxonomy defaults (§17.2 table) apply first; the reviewer overrides via `--dispositions <file>`, and the chapter's core rule is enforced loudly: **an entry the reviewer cannot explain never enters the contract as a plain allow.** Every reviewer override requires a written reason; a declare/exempt-with-expiry without one, an exemption without a future expiry, or an override naming an entry the window never observed fails the run (`ERR_PROFILE_DISPOSITION`) — "we ignored it" is impossible to write down without someone noticing.
+
+### 17.4 Taint, output and the review flow
+
+Workloads with an open incident label (`--incident <workload>`, repeatable) are **quarantined**: the profiler still clusters and reports (evidence for the investigation), but emits no candidate and exits non-zero — a window over a compromised workload is a crime-scene photo, not a portrait. When an investigation closes, exclude the behavior it found by name and start a clean window.
+
+A non-quarantined run writes `<workload>.candidate.yaml` and `<workload>.provenance.json` (sidecar: per-entry sources, confirmed flag, counts, first/last seen, days seen, day ratio, frequency class, period, disposition + origin, reason, expiry, section detail; window; annotations; gate summary). The candidate is a schema-valid SBoB v0.0.4 document — the profiler self-checks that it round-trips through the repo's own parser and validator, so it can be validated, transpiled and diffed by the unmodified M1–M8 toolchain. Metadata annotations record the derivation (`sbob.develapp.io/derived`, provenance sidecar, window days/from/to). stdout is the review markdown with **odd behaviors first** — the held/investigated/unverified queue a reviewer must dispose of appears before the candidate summary, followed by annotations and the window-honesty statement.
+
+With `--baseline <prior.yaml>` the profiler runs the M8 gate baseline → candidate and attaches the scored delta: the derived contract's first reviewed delta goes through the same PR path a vendor contract's delta does. Bootstrap for a workload with an existing contract is the same command; the gate scores the drift.
+
+### 17.5 Honest limits (v1)
+
+- Derived entries are exact paths/peers observed in the window; `endpoints[]` are not derivable from the Phase-1 telemetry plane (L7 gap, TDS §8) and `execs.args` beyond a stable vector are not generalized — both are human redraft territory.
+- Egress/ingress ports emit as observed (portless events widen the entry to ANY on that peer); protocol is recorded as TCP in v1 (auditd `connect()`).
+- The exempt-with-expiry expiry lives in the provenance sidecar; the *enforcement* of expiry at the detector is future work (rulePolicies has no time-bounded exemptions yet). Until then, an expired exemption is caught by the next profile run (the entry's windowed recurrence is re-evaluated) and by drift.
+- Classification thresholds (0.5 steady, 0.05 sporadic, ±0.25 cadence band) are proposal-grade defaults to calibrate per estate — a batch estate's steady cutoff is not a web service's.
+- Lab validation on the M1–M4 Wazuh lab (exit criterion: a signed candidate for a lab workload with no vendor SBoB) is pending, mirroring M5's production-pilot carve-out; the fixture suite (`test/profiler-fixtures/`) pins the pipeline semantics deterministically in the meantime.
 
 ## Appendix A — References
 
@@ -628,3 +671,6 @@ The profiler closes the M8 gap: compare *observed* behavior (Wazuh alert history
 | `ERR_SECTION_CAP` | section entry count exceeds policy cap (e.g. 512 for `execs`) |
 | `ERR_SIGNATURE_UNAVAILABLE` | signature verification required but no verifier available (no cosign binary and no `--skip-signature-verify`) |
 | `ERR_YAML_PARSE` | SBoB YAML could not be parsed by the transpiler's YAML-subset parser (loud failure on unsupported constructs: tabs, block scalars, anchors/aliases) |
+| `ERR_PROFILE_EVENT` | profiler (M9): a normalized event line is malformed, or the internal candidate round-trip check failed |
+| `ERR_PROFILE_SCOPE` | profiler (M9): the event stream contains no events for the requested workload |
+| `ERR_PROFILE_DISPOSITION` | profiler (M9): reviewer dispositions are invalid — a plain-allow declare without a written reason, an exemption without a future expiry, or an override naming an entry the window never observed |
