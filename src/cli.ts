@@ -10,8 +10,12 @@
  *   node src/cli.ts diff --old <a.yaml> --new <b.yaml>
  *         [--report <path>] [--fail-on none|advisory|mandatory]
  *         [--namespace <dir>] [--internal-suffix <suffix>]
+ *   node src/cli.ts profile --events <events.jsonl> --workload <name> --image <imageID>
+ *         [--k8s-namespace <ns>] [--window-days <N>] [--out-dir <dir>]
+ *         [--dispositions <file>] [--incident <workload>] [--baseline <sbob.yaml>]
+ *         [--steady-cutoff <f>] [--sporadic-cutoff <f>] [--cadence-tolerance <f>]
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { exit } from "node:process";
 import { SbobError } from "./errors.ts";
 import { parseYaml } from "./yaml.ts";
@@ -20,6 +24,11 @@ import { buildIR } from "./ir.ts";
 import { lintIR } from "./lint.ts";
 import { transpile } from "./transpile.ts";
 import { diffSbobs, formatDiffReport, type GateVerdict } from "./diffgate.ts";
+import {
+  parseEventStream, profileEvents,
+  DEFAULT_WINDOW_DAYS, STEADY_CUTOFF_DEFAULT, SPORADIC_CUTOFF_DEFAULT, CADENCE_TOLERANCE_DEFAULT,
+  type DispositionFile,
+} from "./profiler.ts";
 
 function usage(): never {
   console.error(`usage: sbobctl <command> [options]
@@ -28,6 +37,7 @@ commands:
   transpile  generate a Wazuh detection bundle from one or more SBoB files
   validate   parse, schema-check and lint an SBoB without emitting artifacts
   diff       semantic SBoB release diff with scored delta ladder (M8)
+  profile    derive a candidate SBoB + provenance from an sbob.* event window (M9)
 
 options:
   --sbob <path>                 SBoB YAML file (repeatable for transpile)
@@ -46,6 +56,24 @@ options:
                                  default: inferred from parent dirs of prior exact execs)
   --internal-suffix <suffix>    (diff) extra internal DNS suffix (repeatable; defaults:
                                  svc, cluster.local, internal, local)
+  --events <path>               (profile) normalized sbob.* event stream (JSONL)
+  --workload <name>             (profile) workload to profile from the stream
+  --image <imageID>             (profile) container image reference for the candidate
+  --k8s-namespace <ns>          (profile) metadata.namespace for the candidate (default: default)
+  --window-days <N>             (profile) observation window length written on the
+                                 candidate (default 30; must span the slowest
+                                 legitimate cadence plus one full drill cycle)
+  --out-dir <dir>               (profile) output directory (default dist/profile);
+                                 writes <workload>.candidate.yaml and <workload>.provenance.json
+  --dispositions <file>         (profile) reviewer dispositions JSON (declare|hold|
+                                 exempt-with-expiry|investigate; overrides require a reason)
+  --incident <workload>         (profile) workload with an open incident label (repeatable);
+                                 quarantined from the review queue until remediated
+  --baseline <path>             (profile) prior-release SBoB; runs the M8 diff gate
+                                 baseline → candidate and attaches the delta
+  --steady-cutoff <f>           (profile) dayRatio at or above → steady (default 0.5)
+  --sporadic-cutoff <f>         (profile) dayRatio below → sporadic (default 0.05)
+  --cadence-tolerance <f>       (profile) day-gap regularity band for periodic (default 0.25)
 `);
   exit(2);
 }
@@ -64,6 +92,18 @@ interface Args {
   failOn: string;
   namespaces: string[];
   internalSuffixes: string[];
+  events: string;
+  profWorkload: string;
+  image: string;
+  k8sNamespace: string;
+  windowDays: number;
+  outDir: string;
+  dispositions: string;
+  incidents: string[];
+  baseline: string;
+  steadyCutoff: number;
+  sporadicCutoff: number;
+  cadenceTolerance: number;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -81,6 +121,18 @@ function parseArgs(argv: string[]): Args {
     failOn: "mandatory",
     namespaces: [],
     internalSuffixes: [],
+    events: "",
+    profWorkload: "",
+    image: "",
+    k8sNamespace: "default",
+    windowDays: DEFAULT_WINDOW_DAYS,
+    outDir: "dist/profile",
+    dispositions: "",
+    incidents: [],
+    baseline: "",
+    steadyCutoff: STEADY_CUTOFF_DEFAULT,
+    sporadicCutoff: SPORADIC_CUTOFF_DEFAULT,
+    cadenceTolerance: CADENCE_TOLERANCE_DEFAULT,
   };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
@@ -104,6 +156,21 @@ function parseArgs(argv: string[]): Args {
       if (args.failOn !== "none" && args.failOn !== "advisory" && args.failOn !== "mandatory") usage();
     } else if (a === "--namespace") args.namespaces.push(next());
     else if (a === "--internal-suffix") args.internalSuffixes.push(next());
+    else if (a === "--events") args.events = next();
+    else if (a === "--workload") args.profWorkload = next();
+    else if (a === "--image") args.image = next();
+    else if (a === "--k8s-namespace") args.k8sNamespace = next();
+    else if (a === "--window-days") {
+      const d = next();
+      if (!/^\d+$/.test(d) || Number(d) < 1) usage();
+      args.windowDays = Number(d);
+    } else if (a === "--out-dir") args.outDir = next();
+    else if (a === "--dispositions") args.dispositions = next();
+    else if (a === "--incident") args.incidents.push(next());
+    else if (a === "--baseline") args.baseline = next();
+    else if (a === "--steady-cutoff") args.steadyCutoff = Number(next());
+    else if (a === "--sporadic-cutoff") args.sporadicCutoff = Number(next());
+    else if (a === "--cadence-tolerance") args.cadenceTolerance = Number(next());
     else {
       console.error(`unknown option: ${a}`);
       usage();
@@ -169,6 +236,43 @@ async function main(): Promise<void> {
       console.log(formatDiffReport(result));
       const failRank = args.failOn === "none" ? Number.POSITIVE_INFINITY : args.failOn === "advisory" ? 1 : 2;
       if (verdictRank(result.verdict) >= failRank) {
+        exit(1);
+      }
+    } else if (args.command === "profile") {
+      if (args.events === "" || args.profWorkload === "" || args.image === "") usage();
+      const stream = parseEventStream(readFileSync(args.events, "utf8"));
+      let dispositions: DispositionFile | undefined;
+      if (args.dispositions !== "") {
+        try {
+          dispositions = JSON.parse(readFileSync(args.dispositions, "utf8")) as DispositionFile;
+        } catch (e) {
+          if (e instanceof SbobError) throw e;
+          throw new SbobError("ERR_PROFILE_DISPOSITION", "dispositions file is not valid JSON: " + (e as Error).message);
+        }
+      }
+      let baseline: ReturnType<typeof validateSbob> | undefined;
+      if (args.baseline !== "") {
+        baseline = validateSbob(parseYaml(readFileSync(args.baseline, "utf8")));
+      }
+      const result = profileEvents(stream, {
+        workload: args.profWorkload,
+        imageID: args.image,
+        k8sNamespace: args.k8sNamespace,
+        windowDays: args.windowDays,
+        incidents: args.incidents,
+        dispositions,
+        baseline,
+        steadyCutoff: args.steadyCutoff,
+        sporadicCutoff: args.sporadicCutoff,
+        cadenceTolerance: args.cadenceTolerance,
+      });
+      mkdirSync(args.outDir, { recursive: true });
+      writeFileSync(args.outDir + "/" + args.profWorkload + ".provenance.json", result.provenanceJson);
+      if (result.candidateYaml !== undefined) {
+        writeFileSync(args.outDir + "/" + args.profWorkload + ".candidate.yaml", result.candidateYaml);
+      }
+      console.log(result.reviewReport);
+      if (result.status !== "candidate") {
         exit(1);
       }
     } else {
