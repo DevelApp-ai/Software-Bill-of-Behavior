@@ -1,0 +1,2 @@
+# ingress CDB address list: key=ip/mask (canonicalized), value=identifier; shared with the linux bundle (TDS 6.4)
+10.244.0.0/16:app-clients

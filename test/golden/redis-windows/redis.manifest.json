@@ -1,0 +1,37 @@
+{
+  "workload": {
+    "name": "redis",
+    "namespace": "cache-tier",
+    "imageID": "docker.io/library/redis@sha256:e508c66a2e1d5d5f8d16b1bbf85e6c1c19b9e5c4c5d1e3f7e5a9d7d0f8e3f4d2",
+    "sbobVersion": "0.0.4",
+    "scope": {
+      "linuxGroups": [
+        "sbob-redis"
+      ],
+      "windowsGroups": [
+        "sbob-redis"
+      ],
+      "k8s": {
+        "namespace": "cache-tier",
+        "imageID": "docker.io/library/redis@sha256:e508c66a2e1d5d5f8d16b1bbf85e6c1c19b9e5c4c5d1e3f7e5a9d7d0f8e3f4d2"
+      }
+    }
+  },
+  "target": "windows",
+  "files": [
+    "wazuh/agent-conf/sbob/redis.xml",
+    "wazuh/lists/sbob/redis/egress_addrs",
+    "wazuh/lists/sbob/redis/ingress_addrs",
+    "wazuh/rules/sbob/100000_redis_windows.xml"
+  ],
+  "coverageNotes": [
+    "ingress: Linux accept() telemetry cannot attribute peers; drift rules emitted but require host-firewall or accept-path decoder validation (TDS 8)",
+    "capabilities: section-absent",
+    "windows: execs[].args drift is heuristic-equivalent (CommandLine tokenization, TDS 7.3.4) — flagged partial",
+    "windows: opens[].flags are not evaluable from Sysmon telemetry; EID 11 covers file-create only (TDS 8.2)",
+    "windows: capabilities[] is N/A on Windows (TDS 8.2)",
+    "windows: execs/opens allowlists compile to PCRE2 alternations (CDB keys cannot contain the drive-letter ':')",
+    "windows: requires the shipped ruleset parent rule 61600 and Wazuh >= 4.4 (type=\"pcre2\" field attribute)"
+  ],
+  "labValidation": "pending"
+}
