@@ -46,6 +46,13 @@
     <order>sbob.path</order>
   </decoder>
 
+  <!-- command-wodle output from sbob-audit-digest.sh: sha256 of the node's installed sbob audit key set (TDS 10.1) -->
+  <decoder name="sbob-redis-config-check">
+    <prematch>^sbob-audit-digest: [0-9a-f]{64}</prematch>
+    <regex>^sbob-audit-digest: ([0-9a-f]{64})</regex>
+    <order>sbob.audit_digest</order>
+  </decoder>
+
   <!-- auditd >= 3.0 emits cgroup= on SYSCALL records; the decoders extract the kubepods pod uid (TDS 6.3 tier 1). Real pod uids are hex UUIDs, not decimal; the three real-world cgroup forms are covered by sibling decoders: cgroup v2/systemd with underscores (pod<uid>.scope), cgroup v2/systemd with dashes (pod<uid>.scope), and cgroup v1 (pod<uid>/). OS_Regex-safe on purpose (decoders default to OS_Regex): no lookaheads, no character classes, no bounded quantifiers -->
   <decoder name="sbob-redis-audit-cgroup">
     <parent>sbob-redis-audit-key</parent>

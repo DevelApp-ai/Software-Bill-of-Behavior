@@ -5,7 +5,8 @@
  *
  * Band 100000-199999. Slots are allocated once from a committed registry
  * (docs/sbob-registry.yaml) and never reused. Section codes: 0 base, 1 execs,
- * 2 opens, 3 egress, 4 ingress, 5 capabilities, 6 rulePolicies, 7 attribution.
+ * 2 opens, 3 egress, 4 ingress, 5 capabilities, 6 rulePolicies, 7 attribution,
+ * 8 ops (M5: config-check (8,3), sbob-cadence (8,1); TDS 6.1 amendment).
  *
  * Variant digits (deviation from TDS 6.1, documented there):
  *   0-4 = Linux / k8s-node rule kinds: 0 base, 1 drift, 2 escalation, 3 informational, 4 exemption
@@ -23,6 +24,7 @@ export const MAX_SLOT = 999;
 export const SECTION_CODES = {
   base: 0, execs: 1, opens: 2, egress: 3, ingress: 4,
   capabilities: 5, rulePolicies: 6, attribution: 7,
+  ops: 8,
 } as const;
 
 export const LINUX_VARIANTS = { base: 0, drift: 1, escalation: 2, info: 3, exemption: 4 } as const;

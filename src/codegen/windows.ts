@@ -34,6 +34,7 @@ import type { IdAllocator } from "../ruleids.ts";
 import type { ExecCompiled, IR } from "../types.ts";
 import type { BundleFile } from "./linux.ts";
 import { signatureCoverageNotes } from "./signatures.ts";
+import { bundleVersion } from "./opshealth.ts";
 import { buildCoverageMatrix, assertCoverageComplete } from "../coverage.ts";
 import type { XmlRule } from "./xml.ts";
 import { renderRule, xmlFileHeader } from "./xml.ts";
@@ -378,6 +379,9 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
           {
             workload: ir.workload,
             target: "windows",
+            sbobVersion: ir.workload.sbobVersion,
+            imageID: ir.workload.imageID,
+            bundleVersion: bundleVersion(ir),
             files: files.map((f) => f.path),
             coverage,
             coverageNotes: [

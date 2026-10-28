@@ -11,3 +11,15 @@
   <run_on_start>yes</run_on_start>
   <disable_on_start>no</disable_on_start>
 </wodle>
+
+<!-- M5 config-check (TDS 10.1): report the node's installed sbob audit key set digest;
+     the manager-side rule (8,3) compares it against the bundle and alerts when the
+     node needs an audit.rules rollout. The script ships in the group's shared dir;
+     confirm the agent-side shared path on the pilot node (see docs/runbook.md). -->
+<wodle name="command">
+  <disabled>no</disabled>
+  <tag>sbob-config-check</tag>
+  <command>bash /var/ossec/etc/shared/sbob-redis/sbob-audit-digest.sh</command>
+  <interval>30m</interval>
+  <ignore_output>no</ignore_output>
+</wodle>

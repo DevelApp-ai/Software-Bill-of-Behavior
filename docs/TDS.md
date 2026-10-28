@@ -1,6 +1,6 @@
 # SBoB → Wazuh Transpiler — Technical Design Specification
 
-**Version:** 1.4-draft · **Date:** 2026-10-28 · **Status:** Proposed (M1 + M2 + M3 + M4 implementation deviations folded in)
+**Version:** 1.5-draft · **Date:** 2026-10-28 · **Status:** Proposed (M1 + M2 + M3 + M4 + M5 + M8 implementation deviations folded in)
 **Author:** Detection Engineering (DevelApp)
 **Source standard:** Software Bill of Behavior (SBoB), spec v0.0.4 ([spec](https://billofbehavior.com/bob/docs/spec/), [repo](https://github.com/k8sstormcenter/bob))
 **Target platform (Phase 1):** Wazuh 4.x — Windows hosts, Linux hosts, Kubernetes nodes
@@ -105,12 +105,15 @@ sbob-detection/
 ├── wazuh/
 │   ├── rules/sbob/            # generated rule files, one per workload
 │   ├── decoders/sbob/         # custom decoders (saddr, attribution)
-│   ├── lists/sbob/            # CDB allowlists
+│   ├── lists/sbob/            # CDB allowlists (rule <list> src is lists-root-relative)
 │   ├── audit/sbob/            # audit.rules fragments per workload
-│   └── groups/                # agent.conf fragments per agent group
-├── coverage/                  # coverage manifests, CI reports
+│   ├── agent-conf/sbob/       # agent.conf fragments + audit-digest scripts per workload
+│   └── manager/               # manager-side setup notes (k8s API audit)
+├── *.manifest.json            # per-workload coverage matrix + bundleVersion (M4/M5)
 └── sbobs/                     # pinned SBoB sources (for reproducible builds)
 ```
+
+**Deploy-side flattening (as implemented in M5):** the Wazuh rules/decoders loader does not recurse into subdirectories, so `scripts/sync-manager.sh` flattens `wazuh/rules/sbob/*.xml` → `/var/ossec/rules/sbob_<file>` (decoders likewise), keeps CDB list paths intact (`sbob/**`), and materializes per-workload agent groups under `/var/ossec/etc/shared/sbob-<name>/agent.conf` (concatenating the linux and k8s-node fragments when both exist; the audit-digest script ships in the same shared dir).
 
 ---
 
@@ -261,7 +264,7 @@ Generated IDs live in the **100000–199999** band (Wazuh reserves 1–99999 for
 rule_id = 100000
         + workload_slot × 100        # workload_slot = stable registry index (docs/sbob-registry.yaml)
         + section_code × 10          # 0 base, 1 execs, 2 opens, 3 egress, 4 ingress,
-                                      # 5 capabilities, 6 rulePolicies, 7 attribution
+                                      # 5 capabilities, 6 rulePolicies, 7 attribution, 8 ops
         + variant                     # per-kind digit; layout below (implemented M1)
 ```
 
@@ -272,6 +275,7 @@ rule_id = 100000
   - `5–9` — **Windows** rule kinds: `5` base, `6` drift, `7` sustained-drift escalation, `8` informational, `9` exemption. Windows gets its own band so a workload's Windows and Linux rules for the same section never collide within one slot.
 - **Windows secondary-drift allocation (as implemented in M2; amends the sketch above):** execs needs two drift rules (image + args) and egress needs two (ip/port + DNS-name), but a section's variant budget allows one rule per kind. The **base section (code 0)** therefore hosts the secondary drift rules: `(0,6)` = execs args drift (§7.3.4), `(0,7)` = egress DNS-name drift (EID 22); `(0,8)` = Sysmon-prerequisite health (EID 4 informational), `(0,5)` = the global Windows base (chains off shipped rule `61600`).
 - **Attribution section semantics (as implemented in M3; Linux/k8s variant band):** the attribution section (code 7) hosts four rules per workload: `(7,0)` = attribution base (level 0; auditd group + `sbob.pod_uid` field), `(7,1)` = podmap-unresolved (level 3; `not_match_key` on `sbob/k8s/podmap` — stale map indicator), `(7,2)` = reserved, `(7,3)` = weak-fallback (level 3; node-scoped Mode B keys), `(7,4)` = container lifecycle (level 3; chains off the shipped docker integration parent rule `87900`, `docker.status=start` + image-repo match).
+- **Ops-health section (as implemented in M5; section code 8):** the ops section hosts two rules per workload, Linux/k8s variant band: `(8,1)` = sbob-cadence (level 9; k8s target only, chains off the shipped docker integration parent rule `87900`, fires on `docker.status=start` when the image reference is repo-matching but digest-mismatched; only digest-bearing refs are verifiable, tag-only starts are not alerted) and `(8,3)` = config-check (level 5; linux + k8s targets, fires from the command-wodle digest line when the node’s installed sbob audit key-set digest differs from the bundle — audit rules are not hot-reloadable, TDS 10.1). The digest is sha256 over the sorted unique `-k sbob…` keys of the generated audit fragment. Windows emits no ops rules (no auditd); all manifests carry `sbobVersion`/`imageID`/`bundleVersion` (`sbob-v<ver>-<digest12>`, or `-untagged` for tag-pinned images).
 - **Signature-rule layout (as implemented in M4; amends the §6.2 sketch):** `rulePolicies` (code 6) hosts four agent-side signature rules, all Linux/k8s variant band: `(6,0)` = module-load (level 12, T1547.006), `(6,1)` = namespace-change (level 10, T1611), `(6,2)` = process-tracing (level 10, T1055.008), `(6,3)` = execution-from-memory (level 10, T1620); `(6,4)` = the manager-side JSON rule for `kubernetes-api-access` (k8s target only, level 12, T1552.001). The remaining four signature behaviors are **base-section overlays** (code 0): `(0,1)` = sensitive-file-access (child of the opens drift rule), `(0,2)` = service-account-token-access (child of opens drift), `(0,3)` = kubernetes-api-access connect overlay (child of egress drift), `(0,4)` = binary-not-in-container-image (informational correlate, child of the container-lifecycle rule; cross-event correlation is not a single-event rule, so it is documented as a triage entry point). Overlays are emitted **only when the parent drift rule exists** (parent ids computed via the raw-id formula, never re-allocated — the allocator throws `ERR_ID_COLLISION` on double allocation).
 
 ### 6.2 Rule hierarchy (per workload)
@@ -456,6 +460,14 @@ Source: `example/redis` SBoB (abridged) → Linux target.
 3. **SBoB update cadence:** mirrors image lifecycle — new image digest ⇒ new SBoB ⇒ new bundle; a rule that alerts "image running without matching SBoB bundle" (Docker listener + registry lookup) closes the drift-of-the-drift-system gap.
 4. **Tiering:** drift alerts level 9 → SIEM; frequency-escalated level 12 → ticket; `section-absent` info level 2 → profile-quality backlog.
 
+**As implemented in M5:**
+
+- **Config-check (10.1):** the bundle ships a command-wodle fragment (`wazuh/agent-conf/sbob/<name>.xml`, merged into the k8s fragment when transpiling k8s-node) plus `<name>-audit-digest.sh`, which reports the node’s installed sbob key-set digest every 30m; rule (8,3) compares it against the bundle’s expected digest (decoder `sbob-<name>-config-check`, order `sbob.audit_digest`) and stays silent while the node matches. It is the audit-rollout completion signal. Caveat: multi-workload nodes see it fire on any workload’s key-set difference — the agent-group model is single-workload per node (docs/runbook.md §6).
+- **Sync (10.2):** `scripts/sync-manager.sh <bundle-dir> [--root /var/ossec] [--dry-run]` performs the mapping in §3.3 (rules/decoders flattened, lists path-preserved, agent groups materialized with the digest script). Rollback = git revert + re-sync + restart; node audit revert follows the rollout procedure.
+- **Bundle versioning (10.2):** each manifest carries `bundleVersion` = `sbob-v<sbobVersion>-<imageDigest12>` (or `-untagged`), tying the deployed rule set to the pinned image generation.
+- **Cadence (10.3):** rule (8,1) sbob-cadence alerts when a container starts from the workload’s image repo with a digest that differs from the SBoB-pinned imageID, closing the drift-of-the-drift-system gap. Only digest-bearing image references are verifiable from docker events — tag-only starts are not alerted; the manifest notes this via a coverage note when the imageID is tag-pinned.
+- **Pilot (10.4):** the production pilot checklist (deploy, agent-group binding, silence/fires per family, config-check silence, tiering exercise, rollback rehearsal) is docs/runbook.md §7; lab evidence remains automated in CI (logtest corpus, coverage manifest, determinism, attack false-negative suite).
+
 ---
 
 ## 11. Testing strategy
@@ -521,7 +533,7 @@ stateDiagram-v2
 | M2 | Windows codegen (Sysmon EIDs 1/3/11/22; opens = file-create partial) | same, on a lab Windows host with Sysmon (`scripts/logtest-corpus.sh windows`) |
 | M3 | K8s attribution (Mode A default; cgroup decoder stretch) | redis attack suite matrix published (`docs/attack-matrix.md`) + `scripts/logtest-corpus.sh k8s` corpus on a lab k8s node |
 | M4 | rulePolicies signature rules + coverage manifest + CI gates | full §8 matrix machine-generated — **delivered** (manifest `coverage` key, `assertCoverageComplete` build gate, determinism + attack-harness CI steps) |
-| M5 | Deploy-repo GitOps flow + ops runbook | production pilot on one workload |
+| M5 | Deploy-repo GitOps flow + ops runbook | flow + runbook + ops-health rules **delivered** (sync script, config-check (8,3), cadence (8,1), bundleVersion); production pilot pending (docs/runbook.md §7) |
 | M6 | Phase 2 codegen (Sigma, Velociraptor, MDE, Falco) | per-engine blind-spot matrix |
 | M7 | Phase 3 enforcement behind state machine | enforcement pilot in Audit mode |
 | M8 | SBoB semantic diff gate — scored release deltas (`sbobctl diff`, §16) | fixture pair Δ = 45 mandatory + immediate review; golden JSON committed; CI determinism/verdict step |
