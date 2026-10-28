@@ -11,7 +11,7 @@ Monitor **Linux**, **Windows**, and **Kubernetes** deployments from one declared
 | M1 | Transpiler core: SBoB YAML parser, validator, IR, linter, deterministic rule-ID allocation, PCRE2 wildcard compiler, Linux/k8s-node codegen | [#2](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/2) |
 | M2 | Windows Sysmon codegen (EIDs 1/3/11/22; args-drift heuristic, opens file-create partial) — implemented, lab validation pending | [#3](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/3) |
 | M3 | Kubernetes attribution: `--target k8s-node` (cgroup decoders, podmap, attribution rules, docker-listener lifecycle, attack matrix) — implemented, lab validation pending | [#4](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/4) |
-| M4 | rulePolicies + coverage manifest + CI gates | [#5](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/5) |
+| M4 | rulePolicies signature rules (module-load / namespace-change / ptrace / memfd, sensitive-path + SA-token + k8s-API overlays, manager-side k8s-audit JSON rule), machine-generated coverage matrix, attack false-negative harness, CI determinism gate — implemented, lab validation pending | [#5](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/5) |
 | M5 | GitOps deployment + ops runbook | [#6](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/6) |
 | M6 | Phase 2: Sigma/Sysmon, Velociraptor, MDE, Falco codegen | [#7](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/7) |
 | M7 | Phase 3: enforcement | [#8](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/8) |
@@ -36,6 +36,8 @@ sbobs/*.yaml ──parse+validate──▶ IR ──lint──▶ codegen ──
    │ checksums.txt                     sha256 inventory             │
    └───────────────────────────────────────────────────────────┘
 ```
+
+Signature rules (M4) invert the model: generic Wazuh rules (audit keys like `sbob-module-load`, `sbob-process-tracing`) fire by default; `rulePolicies.processAllowed` exemptions compile to per-policy CDB lists (`sigexempts/<policy>`) with a `not_match_key` comm condition, and `containerAllowed: true` suppresses the rule entirely. Every bundle manifest carries a machine-generated `coverage` matrix (section × OS with `REASON_CODES`); completeness is asserted at codegen time, and CI adds a twice-run determinism diff plus the attack-suite false-negative check (62 upstream redis attacks ⇒ `docs/attack-matrix.md`).
 
 Drift detection is allowlist-based: every observed `execve`/`open`/`connect` that is **not** declared in the SBoB raises a Wazuh alert. Allowlists are enforced with CDB list lookups (`not_match_key` / `not_address_match_key`) plus negated PCRE2 alternations for wildcarded entries — see [TDS §5](docs/TDS.md).
 
@@ -78,4 +80,4 @@ scripts/                golden regeneration + wazuh-logtest lab harness + podmap
 
 ## Lab validation
 
-Generated bundles carry a `LAB VALIDATION PENDING` banner until validated against a live Wazuh manager. Run `scripts/logtest-corpus.sh` (linux), `scripts/logtest-corpus.sh windows` or `scripts/logtest-corpus.sh k8s` on a lab manager with the bundle installed: the benign corpus must stay silent and the drift corpus must fire the mapped drift rules (linux: 100011/100021/100031; windows: 100016/100006/100026/100036/100007; k8s: 100011/100021/100031 plus the attribution chain — rule 100071 flags podmap-unresolved, and `scripts/sbob-podmap-refresh.sh` seeds the map to silence it). The 62-attack kill-chain mapping is documented in [docs/attack-matrix.md](docs/attack-matrix.md).
+Generated bundles carry a `LAB VALIDATION PENDING` banner until validated against a live Wazuh manager. Run `scripts/logtest-corpus.sh` (linux), `scripts/logtest-corpus.sh windows` or `scripts/logtest-corpus.sh k8s` on a lab manager with the bundle installed: the benign corpus must stay silent and the drift corpus must fire the mapped drift rules (linux: 100011/100021/100031 plus signatures 100060/100062; windows: 100016/100006/100026/100036/100007; k8s: 100011/100021/100031 plus the attribution chain — rule 100071 flags podmap-unresolved, and `scripts/sbob-podmap-refresh.sh` seeds the map to silence it). The 62-attack kill-chain mapping is documented in [docs/attack-matrix.md](docs/attack-matrix.md).

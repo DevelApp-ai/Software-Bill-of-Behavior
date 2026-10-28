@@ -27,7 +27,7 @@ export function buildIR(doc: SbobDocumentLike, rawYaml?: YamlValue): IR {
       },
     },
     sections: {},
-    rulePolicies: doc.spec.rulePolicies ?? {},
+    rulePolicies: doc.spec.rulePolicies,
     coverageNotes,
   };
 
@@ -120,6 +120,10 @@ export function buildIR(doc: SbobDocumentLike, rawYaml?: YamlValue): IR {
     ir.sections.endpoints = spec.endpoints as any;
     coverageNotes.push("endpoints: HTTP-level sections are not observable from auditd/eventchannel telemetry; coverage deferred to Phase 2 L7 ingestion (TDS 8)");
   }
+
+  // rulePolicies absence is semantic (spec 5.4): absent != NONE — the M4
+  // signature pack is emitted with defaults when the section is missing.
+  if (spec.rulePolicies === undefined) coverageNotes.push("rulePolicies: section-absent");
 
   return ir;
 }

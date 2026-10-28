@@ -24,14 +24,406 @@
     "wazuh/lists/sbob/redis/ingress_addrs",
     "wazuh/rules/sbob/100000_redis_windows.xml"
   ],
+  "coverage": {
+    "workload": "redis",
+    "rows": [
+      {
+        "section": "execs.path",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": []
+          },
+          "windows": {
+            "status": "covered",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": []
+          }
+        }
+      },
+      {
+        "section": "execs.args",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": []
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "ARGS_WIN_CMDLINE"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": []
+          }
+        }
+      },
+      {
+        "section": "opens.path",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": []
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "OPEN_CREATE_ONLY_WIN"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": []
+          }
+        }
+      },
+      {
+        "section": "opens.flags",
+        "cells": {
+          "linux": {
+            "status": "partial",
+            "reasons": [
+              "FLAGS_DEFERRED"
+            ]
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "FLAGS_DEFERRED",
+              "OPEN_CREATE_ONLY_WIN"
+            ]
+          },
+          "k8s": {
+            "status": "partial",
+            "reasons": [
+              "FLAGS_DEFERRED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "egress.ipAddresses",
+        "cells": {
+          "linux": {
+            "status": "partial",
+            "reasons": [
+              "SIG_SADDR_PENDING"
+            ]
+          },
+          "windows": {
+            "status": "covered",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "partial",
+            "reasons": [
+              "SIG_SADDR_PENDING"
+            ]
+          }
+        }
+      },
+      {
+        "section": "egress.dnsNames",
+        "cells": {
+          "linux": {
+            "status": "partial",
+            "reasons": [
+              "DNS_NODE_BLIND"
+            ]
+          },
+          "windows": {
+            "status": "covered",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "partial",
+            "reasons": [
+              "DNS_NODE_BLIND"
+            ]
+          }
+        }
+      },
+      {
+        "section": "egress.selector",
+        "cells": {
+          "linux": {
+            "status": "not-applicable",
+            "reasons": []
+          },
+          "windows": {
+            "status": "not-applicable",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "not-applicable",
+            "reasons": []
+          }
+        }
+      },
+      {
+        "section": "ingress.listener",
+        "cells": {
+          "linux": {
+            "status": "partial",
+            "reasons": [
+              "INGRESS_ACCEPT_WEAK"
+            ]
+          },
+          "windows": {
+            "status": "covered",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "partial",
+            "reasons": [
+              "INGRESS_ACCEPT_WEAK"
+            ]
+          }
+        }
+      },
+      {
+        "section": "capabilities",
+        "cells": {
+          "linux": {
+            "status": "absent",
+            "reasons": [
+              "SECTION_ABSENT"
+            ]
+          },
+          "windows": {
+            "status": "absent",
+            "reasons": [
+              "SECTION_ABSENT"
+            ]
+          },
+          "k8s": {
+            "status": "absent",
+            "reasons": [
+              "SECTION_ABSENT"
+            ]
+          }
+        }
+      },
+      {
+        "section": "endpoints",
+        "cells": {
+          "linux": {
+            "status": "absent",
+            "reasons": [
+              "SECTION_ABSENT"
+            ]
+          },
+          "windows": {
+            "status": "absent",
+            "reasons": [
+              "SECTION_ABSENT"
+            ]
+          },
+          "k8s": {
+            "status": "absent",
+            "reasons": [
+              "SECTION_ABSENT"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.module-load",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "SIG_WIN_DEFERRED"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.namespace-change",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "not-applicable",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.process-tracing",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "SIG_WIN_DEFERRED"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.execution-from-memory",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "SIG_WIN_DEFERRED"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.sensitive-file-access",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "SIG_WIN_DEFERRED"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.service-account-token-access",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "not-applicable",
+            "reasons": []
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.kubernetes-api-access",
+        "cells": {
+          "linux": {
+            "status": "covered",
+            "reasons": [
+              "SIG_NODE_SCOPED"
+            ]
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "SIG_WIN_DEFERRED"
+            ]
+          },
+          "k8s": {
+            "status": "covered",
+            "reasons": [
+              "SIG_MANAGER_JSON"
+            ]
+          }
+        }
+      },
+      {
+        "section": "rulePolicies.binary-not-in-container-image",
+        "cells": {
+          "linux": {
+            "status": "not-applicable",
+            "reasons": []
+          },
+          "windows": {
+            "status": "partial",
+            "reasons": [
+              "SIG_WIN_DEFERRED"
+            ]
+          },
+          "k8s": {
+            "status": "partial",
+            "reasons": [
+              "SIG_CORRELATE"
+            ]
+          }
+        }
+      }
+    ]
+  },
   "coverageNotes": [
     "ingress: Linux accept() telemetry cannot attribute peers; drift rules emitted but require host-firewall or accept-path decoder validation (TDS 8)",
     "capabilities: section-absent",
+    "rulePolicies: section-absent",
+    "rulePolicies: section-absent — signature pack emitted with defaults (fire-by-default, no exemptions; TDS 7.4)",
+    "signatures: audit keys are node-scoped (Mode B, attribution-weak) — declare processAllowed for container runtimes and node daemons (kubelet, containerd) to suppress expected noise",
     "windows: execs[].args drift is heuristic-equivalent (CommandLine tokenization, TDS 7.3.4) — flagged partial",
     "windows: opens[].flags are not evaluable from Sysmon telemetry; EID 11 covers file-create only (TDS 8.2)",
     "windows: capabilities[] is N/A on Windows (TDS 8.2)",
     "windows: execs/opens allowlists compile to PCRE2 alternations (CDB keys cannot contain the drive-letter ':')",
-    "windows: requires the shipped ruleset parent rule 61600 and Wazuh >= 4.4 (type=\"pcre2\" field attribute)"
+    "windows: requires the shipped ruleset parent rule 61600 and Wazuh >= 4.4 (type=\"pcre2\" field attribute)",
+    "windows: rulePolicies signature rules are deferred to a later milestone (auditd-keyed rules have no Sysmon equivalent yet; flagged partial SIG_WIN_DEFERRED in the coverage matrix)"
   ],
   "labValidation": "pending"
 }

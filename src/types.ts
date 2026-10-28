@@ -165,7 +165,14 @@ export interface IR {
     capabilities?: string[];
     endpoints?: EndpointEntry[];
   };
-  rulePolicies: Record<string, RulePolicy>;
+  /**
+   * Generalized signature-rule policies (spec 4.8, TDS 7.4). undefined = the
+   * rulePolicies section is ABSENT from the SBoB (spec 5.4: absent is not
+   * NONE) — the M4 signature pack is then emitted with defaults
+   * (fire-by-default, no exemptions). An explicit empty mapping is NONE and
+   * requires --confirm-none rulePolicies.
+   */
+  rulePolicies: Record<string, RulePolicy> | undefined;
   coverageNotes: string[];
 }
 

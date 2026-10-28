@@ -33,6 +33,8 @@ import { compileDnsPattern, escapeRegExp, portAlternation } from "../wildcards.t
 import type { IdAllocator } from "../ruleids.ts";
 import type { ExecCompiled, IR } from "../types.ts";
 import type { BundleFile } from "./linux.ts";
+import { signatureCoverageNotes } from "./signatures.ts";
+import { buildCoverageMatrix, assertCoverageComplete } from "../coverage.ts";
 import type { XmlRule } from "./xml.ts";
 import { renderRule, xmlFileHeader } from "./xml.ts";
 
@@ -361,30 +363,40 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
   }
 
   // --------------------------------------------------------------------------
-  // 4. bundle manifest
+  // 4. bundle manifest (machine-generated coverage matrix: TDS 8, M4)
   // --------------------------------------------------------------------------
-  files.push({
-    path: `${name}.manifest.json`,
-    content:
-      JSON.stringify(
-        {
-          workload: ir.workload,
-          target: "windows",
-          files: files.map((f) => f.path),
-          coverageNotes: [
-            ...ir.coverageNotes,
-            "windows: execs[].args drift is heuristic-equivalent (CommandLine tokenization, TDS 7.3.4) — flagged partial",
-            "windows: opens[].flags are not evaluable from Sysmon telemetry; EID 11 covers file-create only (TDS 8.2)",
-            "windows: capabilities[] is N/A on Windows (TDS 8.2)",
-            "windows: execs/opens allowlists compile to PCRE2 alternations (CDB keys cannot contain the drive-letter ':')",
-            "windows: requires the shipped ruleset parent rule 61600 and Wazuh >= 4.4 (type=\"pcre2\" field attribute)",
-          ],
-          labValidation: "pending",
-        },
-        null,
-        2,
-      ) + "\n",
-  });
+  {
+    const coverage = buildCoverageMatrix(ir);
+    const problems = assertCoverageComplete(coverage);
+    if (problems.length > 0) {
+      throw new Error(`coverage gate failed for workload ${name}: ${problems.join("; ")}`);
+    }
+    files.push({
+      path: `${name}.manifest.json`,
+      content:
+        JSON.stringify(
+          {
+            workload: ir.workload,
+            target: "windows",
+            files: files.map((f) => f.path),
+            coverage,
+            coverageNotes: [
+              ...ir.coverageNotes,
+              ...signatureCoverageNotes(ir),
+              "windows: execs[].args drift is heuristic-equivalent (CommandLine tokenization, TDS 7.3.4) — flagged partial",
+              "windows: opens[].flags are not evaluable from Sysmon telemetry; EID 11 covers file-create only (TDS 8.2)",
+              "windows: capabilities[] is N/A on Windows (TDS 8.2)",
+              "windows: execs/opens allowlists compile to PCRE2 alternations (CDB keys cannot contain the drive-letter ':')",
+              "windows: requires the shipped ruleset parent rule 61600 and Wazuh >= 4.4 (type=\"pcre2\" field attribute)",
+              "windows: rulePolicies signature rules are deferred to a later milestone (auditd-keyed rules have no Sysmon equivalent yet; flagged partial SIG_WIN_DEFERRED in the coverage matrix)",
+            ],
+            labValidation: "pending",
+          },
+          null,
+          2,
+        ) + "\n",
+    });
+  }
 
   return files;
 }
