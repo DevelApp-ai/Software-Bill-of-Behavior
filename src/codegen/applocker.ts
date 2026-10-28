@@ -21,7 +21,7 @@
  *   - AppLocker Allow rules use the path condition (not publisher/hash);
  *     the SBoB imageID digest does not translate to an AppLocker condition.
  */
-import type { IR } from "../../types.ts";
+import type { IR } from "../types.ts";
 import type { EnforceStateFile } from "../enforce.ts";
 import { effectiveState } from "../enforce.ts";
 import type { BundleFile } from "./linux.ts";

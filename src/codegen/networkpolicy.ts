@@ -24,7 +24,7 @@
  *   - ipBlock except clauses and port ranges are not emitted (SBoB has
  *     neither construct).
  */
-import type { IR, NetCompiled, PortEntry } from "../../types.ts";
+import type { IR, NetCompiled, PortEntry } from "../types.ts";
 import type { EnforceStateFile, EnforceSectionKey } from "../enforce.ts";
 import { effectiveState } from "../enforce.ts";
 import type { BundleFile } from "./linux.ts";
@@ -234,7 +234,7 @@ export function npDiff(
   const sortKeys = (x: unknown): unknown => {
     if (Array.isArray(x)) return x.map(sortKeys);
     if (x !== null && typeof x === "object") {
-      return Object.fromEntries(Object.entries(x as Record<string, unknown>).map(([k, v]) => [k, sortKeys(v)]).sort(([a], [b]) => (a < b ? -1 : 1)));
+      return Object.fromEntries(Object.entries(x as Record<string, unknown>).map(([k, v]) => [k, sortKeys(v)] as [string, unknown]).sort((e1, e2) => (e1[0] < e2[0] ? -1 : 1)));
     }
     return x;
   };

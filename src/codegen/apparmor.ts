@@ -22,8 +22,8 @@
  *   - the profile entry point is the first execs[] path (the workload
  *     binary); attach_disconnected keeps container behavior sane.
  */
-import type { IR } from "../../types.ts";
-import type { OpenCompiled, ExecCompiled } from "../../types.ts";
+import type { IR } from "../types.ts";
+import type { OpenCompiled, ExecCompiled } from "../types.ts";
 import type { EnforceStateFile, EnforceSectionKey } from "../enforce.ts";
 import { effectiveState } from "../enforce.ts";
 import type { BundleFile } from "./linux.ts";

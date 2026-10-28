@@ -26,7 +26,7 @@
  *   - the blocklist is arch-independent by name; x86_64 syscall numbers
  *     are listed in the manifest notes only.
  */
-import type { IR } from "../../types.ts";
+import type { IR } from "../types.ts";
 import type { BundleFile } from "./linux.ts";
 
 export interface SeccompSyscall {
