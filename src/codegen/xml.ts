@@ -13,7 +13,11 @@ export interface XmlRule {
   frequency?: number;
   timeframe?: number;
   description: string;
-  groups: string[];
+  /**
+   * Each element renders one <group> line, its names joined with commas
+   * (Wazuh group semantics: comma-separated within one <group> tag).
+   */
+  groups: string[][];
   mitre?: string[];
   options?: string[];
   comment?: string;

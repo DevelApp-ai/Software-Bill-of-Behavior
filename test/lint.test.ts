@@ -60,7 +60,10 @@ test("execs over the entry cap is ERR_SECTION_CAP", () => {
   const section = ir.sections.execs!;
   const entry = section.entries[0];
   while (section.entries.length <= EXECS_ENTRY_CAP) {
-    section.entries.push({ ...entry, exact: `${entry.exact}-${section.entries.length}` } as typeof entry);
+    section.entries.push({
+      ...entry,
+      source: { ...entry.source, path: `${entry.source.path}-${section.entries.length}` },
+    });
   }
   mustThrow(ir, "ERR_SECTION_CAP");
 });
