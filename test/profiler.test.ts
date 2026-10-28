@@ -14,6 +14,7 @@ import {
   CADENCE_TOLERANCE_DEFAULT,
   type ProfileEvent,
   type DispositionFile,
+  type EntryProvenance,
 } from "../src/profiler.ts";
 
 
@@ -42,7 +43,7 @@ function fixtureProfile(overrides: Partial<Parameters<typeof profileEvents>[1]> 
   return profileEvents(stream, baseOpts({ dispositions, baseline, ...overrides }));
 }
 
-function entry(result: { entries: Array<{ section: string; key: string }> }, key: string) {
+function entry(result: { entries: EntryProvenance[] }, key: string): EntryProvenance {
   const e = result.entries.find((x) => x.section + ":" + x.key === key);
   assert.ok(e !== undefined, `expected entry ${key} in provenance`);
   return e;
