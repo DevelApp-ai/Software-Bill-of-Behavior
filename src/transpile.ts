@@ -13,12 +13,16 @@ import { makeVerifier, type SignatureVerifier } from "./signature.ts";
 import { generateLinuxBundle, type BundleFile } from "./codegen/linux.ts";
 import { generateWindowsBundle } from "./codegen/windows.ts";
 import { generateK8sNodeBundle } from "./codegen/k8s.ts";
+import { generateSigmaBundle } from "./codegen/sigma.ts";
+import { generateVelociraptorBundle } from "./codegen/velociraptor.ts";
+import { generateMdeBundle } from "./codegen/mde.ts";
+import { generateFalcoBundle } from "./codegen/falco.ts";
 import type { IR } from "./types.ts";
 
 export interface TranspileOptions {
   registryPath: string;
   outDir: string;
-  target: "linux" | "windows" | "k8s-node";
+  target: "linux" | "windows" | "k8s-node" | "sigma" | "velociraptor" | "mde" | "falco";
   skipSignatureVerify: boolean;
   confirmNone: string[];
 }
@@ -78,7 +82,15 @@ export async function transpile(sbobPaths: string[], opts: TranspileOptions): Pr
         ? generateLinuxBundle(ir, alloc)
         : opts.target === "windows"
           ? generateWindowsBundle(ir, alloc)
-          : generateK8sNodeBundle(ir, alloc);
+          : opts.target === "k8s-node"
+            ? generateK8sNodeBundle(ir, alloc)
+            : opts.target === "sigma"
+              ? generateSigmaBundle(ir)
+              : opts.target === "velociraptor"
+                ? generateVelociraptorBundle(ir)
+                : opts.target === "mde"
+                  ? generateMdeBundle(ir)
+                  : generateFalcoBundle(ir, alloc);
     for (const f of files) allFiles.push(f);
     workloads.push({ name: ir.workload.name, slot, files: files.map((f) => f.path) });
   }
