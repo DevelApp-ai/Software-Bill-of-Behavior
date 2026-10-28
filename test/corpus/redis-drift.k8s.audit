@@ -17,3 +17,13 @@ type=PATH msg=audit(1699999991.200:2002): item=0 name="/etc/shadow" inode=1301 d
 
 type=SYSCALL msg=audit(1699999992.300:2003): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-connect-redis" cgroup=/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod0f3c8ed9_9d6b_4a1c_b5f2_7c1e0a9d1234.scope/cri-containerd-53b1a3e2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9.scope
 type=SOCKADDR msg=audit(1699999992.300:2003): saddr=0200115CB9DC65040000000000000000
+
+# Signature events (rulePolicies, M4): node-scoped keys fire-by-default; the
+# cgroup decoder stamps sbob.pod_uid so the attribution base (100070, plus
+# 100071 while the podmap is unseeded) fires alongside the signature rule.
+#   init_module (module load)     -> 100060 (SBoB signature: module-load ...)
+#   ptrace (process tracing)      -> 100062 (SBoB signature: process-tracing ...)
+
+type=SYSCALL msg=audit(1699999993.400:2004): arch=c000003e syscall=175 success=yes exit=0 items=1 ppid=3003 pid=3004 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=4294967295 comm="kmod" exe="/usr/bin/kmod" subj=unconfined key="sbob-module-load" cgroup=/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod0f3c8ed9_9d6b_4a1c_b5f2_7c1e0a9d1234.scope/cri-containerd-53b1a3e2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9.scope
+
+type=SYSCALL msg=audit(1699999994.500:2005): arch=c000003e syscall=101 success=yes exit=0 items=1 ppid=3004 pid=3005 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="gdb" exe="/usr/bin/gdb" subj=unconfined key="sbob-process-tracing" cgroup=/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod0f3c8ed9_9d6b_4a1c_b5f2_7c1e0a9d1234.scope/cri-containerd-53b1a3e2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9.scope

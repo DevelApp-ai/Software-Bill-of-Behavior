@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# Lab validation harness (M1/M2/M3 exit criteria, issues #2/#3/#4)
+# Lab validation harness (M1/M2/M3/M4 exit criteria, issues #2/#3/#4/#5)
 #
 # Feeds the benign/drift corpora through a live Wazuh manager running the
 # generated bundle, and asserts:
 #
 #   linux   (M1): benign corpus  -> ZERO drift alerts
-#                 drift corpus   -> 100011 (exec), 100021 (open), 100031 (connect)
+#                 drift corpus   -> 100011 (exec), 100021 (open), 100031 (connect),
+#                                   100060 (module-load sig), 100062 (ptrace sig)
+#                                   [signature rules added in M4]
 #   windows (M2): benign corpus  -> ZERO drift alerts
 #                 drift corpus   -> 100016 (exec image), 100006 (args, TDS 7.3.4),
 #                                   100026 (file create), 100036 (egress),
@@ -14,7 +16,9 @@
 #   k8s     (M3): benign corpus  -> ZERO drift alerts (attribution info rules
 #                                   100070/100071 MAY fire — they are level 0/3
 #                                   attribution, not drift)
-#                 drift corpus   -> 100011 (exec), 100021 (open), 100031 (connect);
+#                 drift corpus   -> 100011 (exec), 100021 (open), 100031 (connect),
+#                                   100060 (module-load sig), 100062 (ptrace sig)
+#                                   [signature rules added in M4];
 #                                   attribution: 100071 (podmap not seeded) is
 #                                   expected on a fresh install — seed the
 #                                   podmap with the corpus pod uid via
@@ -46,7 +50,7 @@ case "$TARGET" in
   linux)
     BENIGN="$CORPUS_DIR/redis-benign.audit"
     DRIFT="$CORPUS_DIR/redis-drift.audit"
-    DRIFT_IDS=(100011 100021 100031)
+    DRIFT_IDS=(100011 100021 100031 100060 100062)
     ;;
   windows)
     BENIGN="$CORPUS_DIR/redis-benign.win.jsonl"
@@ -56,7 +60,7 @@ case "$TARGET" in
   k8s)
     BENIGN="$CORPUS_DIR/redis-benign.k8s.audit"
     DRIFT="$CORPUS_DIR/redis-drift.k8s.audit"
-    DRIFT_IDS=(100011 100021 100031)
+    DRIFT_IDS=(100011 100021 100031 100060 100062)
     ATTR_IDS=(100070 100071 100073 100074)
     ;;
   *)

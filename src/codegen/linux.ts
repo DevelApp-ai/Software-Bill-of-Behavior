@@ -4,9 +4,10 @@
  * Emits, per workload:
  *   - wazuh/audit/sbob/<name>.rules        auditctl fragment (Mode A preferred)
  *   - wazuh/decoders/sbob/<name>.xml       custom decoder chain (lab validation pending)
- *   - wazuh/lists/sbob/<name>/*            CDB allowlists (execs, opens, egress_addrs, ingress_addrs)
- *   - wazuh/rules/sbob/<base>_<name>_linux.xml   base + drift + escalation rules
- *   - <name>.manifest.json                 workload bundle manifest + coverage notes
+ *   - wazuh/lists/sbob/<name>/*            CDB allowlists (execs, opens, egress_addrs, ingress_addrs,
+ *                                          sigexempts/<policy> for rulePolicies.processAllowed, M4)
+ *   - wazuh/rules/sbob/<base>_<name>_linux.xml   drift rules + signature pack (rulePolicies, M4)
+ *   - <name>.manifest.json                 workload bundle manifest + coverage matrix (TDS 8)
  *
  * The audit fragment, CDB lists, decoder chain and section drift rules are
  * shared with the k8s-node target (TDS 6.3: k8s nodes run the Linux agent and
@@ -18,6 +19,8 @@ import type { IdAllocator } from "../ruleids.ts";
 import type { IR } from "../types.ts";
 import type { Decoder, XmlRule } from "./xml.ts";
 import { renderDecoder, renderRule, xmlFileHeader } from "./xml.ts";
+import { signatureAuditLines, signatureExemptListFiles, signatureRulesShared, signatureCoverageNotes } from "./signatures.ts";
+import { buildCoverageMatrix, assertCoverageComplete } from "../coverage.ts";
 
 export interface BundleFile {
   path: string;
@@ -71,7 +74,9 @@ export function auditFragmentLines(ir: IR): { lines: string[]; auditKeys: string
       lines.push(`-a always,exit -F arch=b64 -S connect -k sbob-connect`);
     }
   }
-  // signature-rule syscalls (rulePolicies, M4) are emitted by the M4 codegen.
+  // signature-rule syscalls (rulePolicies, M4): node-scoped audit keys whose
+  // fire-by-default rules live in signatures.ts (shared with k8s-node).
+  lines.push(...signatureAuditLines(ir));
   const auditKeys: string[] = [];
   if (s.execs !== undefined) auditKeys.push(modeA ? `sbob-exec-${name}` : "sbob-exec");
   if (s.opens !== undefined) auditKeys.push(modeA ? `sbob-open-${name}` : "sbob-open");
@@ -111,6 +116,8 @@ export function cdbListFiles(ir: IR, name: string): BundleFile[] {
           .join("\n") + "\n",
     });
   }
+  // signature exemptions (rulePolicies.processAllowed, M4): CDB sigexempts
+  for (const f of signatureExemptListFiles(ir, name)) files.push(f);
   return files;
 }
 
@@ -372,11 +379,12 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
     files.push({ path: `wazuh/decoders/sbob/${name}.xml`, content: xml });
   }
 
-  // 4. rules XML ---------------------------------------------------------------
+  // 4. rules XML: section drift rules + signature pack (rulePolicies, M4) ----
   {
-    const rules = linuxSectionRules(ir, alloc);
+    const base = linuxSectionRules(ir, alloc);
+    const rules = [...base, ...signatureRulesShared(ir, alloc, base)];
     const xml = [
-      xmlFileHeader(`sbob drift rules for workload ${name} — Linux / k8s-node target`, name, LAB_NOTE),
+      xmlFileHeader(`sbob drift + signature rules for workload ${name} — Linux / k8s-node target`, name, LAB_NOTE),
       "",
       ...rules.map(renderRule).join("\n\n").split("\n"),
       "",
@@ -387,21 +395,30 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
     });
   }
 
-  // 5. bundle manifest (minimal; full coverage matrix lands with M4) -----------
-  files.push({
-    path: `${name}.manifest.json`,
-    content: JSON.stringify(
-      {
-        workload: ir.workload,
-        target: "linux",
-        files: files.map((f) => f.path),
-        coverageNotes: ir.coverageNotes,
-        labValidation: "pending",
-      },
-      null,
-      2,
-    ) + "\n",
-  });
+  // 5. bundle manifest (machine-generated coverage matrix: TDS 8, M4) -------
+  {
+    const coverage = buildCoverageMatrix(ir);
+    const problems = assertCoverageComplete(coverage);
+    if (problems.length > 0) {
+      throw new Error(`coverage gate failed for workload ${name}: ${problems.join("; ")}`);
+    }
+    files.push({
+      path: `${name}.manifest.json`,
+      content:
+        JSON.stringify(
+          {
+            workload: ir.workload,
+            target: "linux",
+            files: files.map((f) => f.path),
+            coverage,
+            coverageNotes: [...ir.coverageNotes, ...signatureCoverageNotes(ir)],
+            labValidation: "pending",
+          },
+          null,
+          2,
+        ) + "\n",
+    });
+  }
 
   return files;
 }

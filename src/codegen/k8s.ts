@@ -16,9 +16,11 @@
  *                                          scripts/sbob-podmap-refresh.sh
  *   - wazuh/rules/sbob/<base>_<name>_k8s-node.xml  drift rules (shared)
  *                                          + attribution section (7x)
+ *                                          + signature pack (rulePolicies, M4)
  *   - wazuh/manager/sbob/k8s-api-audit.md  API-server audit ingestion path
- *                                          (rulePolicies rule lands with M4)
- *   - <name>.manifest.json                 manifest + coverage notes
+ *                                          (evaluated by the manager-side
+ *                                          kubernetes-api-access rule)
+ *   - <name>.manifest.json                 manifest + coverage matrix (TDS 8)
  *
  * Attribution rules (TDS 6.3, section code 7):
  *   (7,0) base          — cgroup-derived sbob.pod_uid present (level 0)
@@ -41,6 +43,8 @@ import type { Decoder, XmlRule } from "./xml.ts";
 import { renderDecoder, renderRule, xmlFileHeader } from "./xml.ts";
 import type { BundleFile } from "./linux.ts";
 import { auditDecoders, auditFragmentLines, cdbListFiles, linuxSectionRules } from "./linux.ts";
+import { signatureRulesK8s, signatureRulesShared, signatureCoverageNotes } from "./signatures.ts";
+import { buildCoverageMatrix, assertCoverageComplete } from "../coverage.ts";
 
 const LAB_NOTE =
   "LAB VALIDATION PENDING (M3 exit criteria): replay scripts/logtest-corpus.sh k8s corpus on a lab k8s node with a live wazuh manager";
@@ -199,8 +203,9 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
     });
 
     // (7,4) container lifecycle — docker-listener start event for the workload image
+    const lifecycleRuleId = alloc.linux("attribution", "exemption");
     rules.push({
-      id: alloc.linux("attribution", "exemption"),
+      id: lifecycleRuleId,
       level: 3,
       ifSid: DOCKER_PARENT_RULE,
       fields: [
@@ -213,8 +218,13 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       options: ["no_full_log"],
     });
 
+    // M4 signature pack (rulePolicies, TDS 7.4): shared audit-keyed rules and
+    // drift overlays, then k8s-only manager-side + correlate rules
+    rules.push(...signatureRulesShared(ir, alloc, rules));
+    rules.push(...signatureRulesK8s(ir, alloc, lifecycleRuleId));
+
     const xml = [
-      xmlFileHeader(`sbob drift + attribution rules for workload ${name} — k8s-node target`, name, LAB_NOTE),
+      xmlFileHeader(`sbob drift + attribution + signature rules for workload ${name} — k8s-node target`, name, LAB_NOTE),
       "",
       ...rules.map(renderRule).join("\n\n").split("\n"),
       "",
@@ -234,30 +244,39 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
   });
 
   // --------------------------------------------------------------------------
-  // 7. bundle manifest
+  // 7. bundle manifest (machine-generated coverage matrix: TDS 8, M4)
   // --------------------------------------------------------------------------
-  files.push({
-    path: `${name}.manifest.json`,
-    content:
-      JSON.stringify(
-        {
-          workload: ir.workload,
-          target: "k8s-node",
-          files: files.map((f) => f.path),
-          coverageNotes: [
-            ...ir.coverageNotes,
-            "k8s: attribution tiers per TDS 6.3 — 1 cgroup+podmap (auditd >= 3.0), 2 Mode A exe-scoped keys (default), 3 weak fallback (attribution=weak)",
-            "k8s: podmap (sbob/k8s/podmap) is node runtime data maintained by scripts/sbob-podmap-refresh.sh; not derived from the SBoB",
-            "k8s: docker-listener lifecycle rule requires the shipped integration ruleset (parent rule 87900)",
-            "k8s: DNS-name egress entries are not observable from node auditd telemetry — Windows agents detect them via Sysmon EID 22 (TDS 8)",
-            "k8s: kubernetes-api-access signature rule lands with M4 (rulePolicies); this bundle delivers the manager-side ingestion path only",
-          ],
-          labValidation: "pending",
-        },
-        null,
-        2,
-      ) + "\n",
-  });
+  {
+    const coverage = buildCoverageMatrix(ir);
+    const problems = assertCoverageComplete(coverage);
+    if (problems.length > 0) {
+      throw new Error(`coverage gate failed for workload ${name}: ${problems.join("; ")}`);
+    }
+    files.push({
+      path: `${name}.manifest.json`,
+      content:
+        JSON.stringify(
+          {
+            workload: ir.workload,
+            target: "k8s-node",
+            files: files.map((f) => f.path),
+            coverage,
+            coverageNotes: [
+              ...ir.coverageNotes,
+              ...signatureCoverageNotes(ir),
+              "k8s: attribution tiers per TDS 6.3 — 1 cgroup+podmap (auditd >= 3.0), 2 Mode A exe-scoped keys (default), 3 weak fallback (attribution=weak)",
+              "k8s: podmap (sbob/k8s/podmap) is node runtime data maintained by scripts/sbob-podmap-refresh.sh; not derived from the SBoB",
+              "k8s: docker-listener lifecycle rule requires the shipped integration ruleset (parent rule 87900)",
+              "k8s: DNS-name egress entries are not observable from node auditd telemetry — Windows agents detect them via Sysmon EID 22 (TDS 8)",
+              "k8s: manager-side kubernetes-api-access rule (rulePolicies signature) evaluates the API audit log ingested per wazuh/manager/sbob/k8s-api-audit.md",
+            ],
+            labValidation: "pending",
+          },
+          null,
+          2,
+        ) + "\n",
+    });
+  }
 
   return files;
 }
@@ -276,8 +295,8 @@ export function imageRepoRegex(imageID: string): string {
 function k8sApiAuditDoc(name: string): string {
   return `# k8s API server audit ingestion — ${name} scope
 
-The \`kubernetes-api-access\` signature rule (rulePolicies) lands with M4;
-this document is the ingestion path delivered by M3 (TDS 4.4).
+The manager-side \`kubernetes-api-access\` signature rule (rulePolicies, TDS 7.4)
+evaluates events ingested through this path (TDS 4.4).
 
 ## API server: emit audit events
 

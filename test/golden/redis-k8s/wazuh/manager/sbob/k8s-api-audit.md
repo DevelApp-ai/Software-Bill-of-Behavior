@@ -1,7 +1,7 @@
 # k8s API server audit ingestion — redis scope
 
-The `kubernetes-api-access` signature rule (rulePolicies) lands with M4;
-this document is the ingestion path delivered by M3 (TDS 4.4).
+The manager-side `kubernetes-api-access` signature rule (rulePolicies, TDS 7.4)
+evaluates events ingested through this path (TDS 4.4).
 
 ## API server: emit audit events
 

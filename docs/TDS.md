@@ -1,6 +1,6 @@
 # SBoB → Wazuh Transpiler — Technical Design Specification
 
-**Version:** 1.3-draft · **Date:** 2026-10-28 · **Status:** Proposed (M1 + M2 + M3 implementation deviations folded in)
+**Version:** 1.4-draft · **Date:** 2026-10-28 · **Status:** Proposed (M1 + M2 + M3 + M4 implementation deviations folded in)
 **Author:** Detection Engineering (DevelApp)
 **Source standard:** Software Bill of Behavior (SBoB), spec v0.0.4 ([spec](https://billofbehavior.com/bob/docs/spec/), [repo](https://github.com/k8sstormcenter/bob))
 **Target platform (Phase 1):** Wazuh 4.x — Windows hosts, Linux hosts, Kubernetes nodes
@@ -272,6 +272,7 @@ rule_id = 100000
   - `5–9` — **Windows** rule kinds: `5` base, `6` drift, `7` sustained-drift escalation, `8` informational, `9` exemption. Windows gets its own band so a workload's Windows and Linux rules for the same section never collide within one slot.
 - **Windows secondary-drift allocation (as implemented in M2; amends the sketch above):** execs needs two drift rules (image + args) and egress needs two (ip/port + DNS-name), but a section's variant budget allows one rule per kind. The **base section (code 0)** therefore hosts the secondary drift rules: `(0,6)` = execs args drift (§7.3.4), `(0,7)` = egress DNS-name drift (EID 22); `(0,8)` = Sysmon-prerequisite health (EID 4 informational), `(0,5)` = the global Windows base (chains off shipped rule `61600`).
 - **Attribution section semantics (as implemented in M3; Linux/k8s variant band):** the attribution section (code 7) hosts four rules per workload: `(7,0)` = attribution base (level 0; auditd group + `sbob.pod_uid` field), `(7,1)` = podmap-unresolved (level 3; `not_match_key` on `sbob/k8s/podmap` — stale map indicator), `(7,2)` = reserved, `(7,3)` = weak-fallback (level 3; node-scoped Mode B keys), `(7,4)` = container lifecycle (level 3; chains off the shipped docker integration parent rule `87900`, `docker.status=start` + image-repo match).
+- **Signature-rule layout (as implemented in M4; amends the §6.2 sketch):** `rulePolicies` (code 6) hosts four agent-side signature rules, all Linux/k8s variant band: `(6,0)` = module-load (level 12, T1547.006), `(6,1)` = namespace-change (level 10, T1611), `(6,2)` = process-tracing (level 10, T1055.008), `(6,3)` = execution-from-memory (level 10, T1620); `(6,4)` = the manager-side JSON rule for `kubernetes-api-access` (k8s target only, level 12, T1552.001). The remaining four signature behaviors are **base-section overlays** (code 0): `(0,1)` = sensitive-file-access (child of the opens drift rule), `(0,2)` = service-account-token-access (child of opens drift), `(0,3)` = kubernetes-api-access connect overlay (child of egress drift), `(0,4)` = binary-not-in-container-image (informational correlate, child of the container-lifecycle rule; cross-event correlation is not a single-event rule, so it is documented as a triage entry point). Overlays are emitted **only when the parent drift rule exists** (parent ids computed via the raw-id formula, never re-allocated — the allocator throws `ERR_ID_COLLISION` on double allocation).
 
 ### 6.2 Rule hierarchy (per workload)
 
@@ -303,7 +304,7 @@ Notes:
 - **Sysmon `QueryName` normalization (M2):** SBoB `dnsNames` are canonical DNS zone forms (trailing dot); Sysmon EID 22 `QueryName` carries the hostname **without** the trailing dot, so the Windows DNS drift fragment compiles from the stripped spelling. The Linux path keeps the canonical trailing-dot form for M4 DNS ingestion.
 - **Both** the CDB `not_match_key` and the negated-pattern regex must match (AND) ⇒ alert only when the exe is neither an exact nor pattern allowlist member.
 - `level="9"` (default drift severity). Alert fields (`sbob.workload`, `sbob.pod`, imageID) are attached by the base rule / decoders so every drift alert carries full context.
-- `rulePolicies` **signature rules** invert this: the generic Wazuh rule (e.g. `sbob-module-load`) fires by default; a child rule at `level="0"` with `<if_sid>` + `comm` match on `processAllowed[]` suppresses when the actor is exempt. `containerAllowed: true` ⇒ the transpiler does not emit the rule for that workload at all (per spec §4.8: must not be treated as a deny).
+- `rulePolicies` **signature rules** invert this: the generic Wazuh rule (e.g. `sbob-module-load`) fires by default. *(as implemented, M4)* exemptions use a **CDB list condition, not a level-0 child rule** (deviation from this sketch — it saves a variant digit per policy): each policy with `processAllowed[]` gets a per-policy list `sbob/<workload>/sigexempts/<policy>` (key = `comm`) and the rule itself carries `<list field="sbob.comm" lookup="not_match_key">`, so the rule fires only when the actor is not exempt. `containerAllowed: true` ⇒ the transpiler does not emit the rule or its audit line for that workload at all (per spec §4.8: must not be treated as a deny). Audit keys for signature rules are node-scoped (Mode B, attribution-weak) — a documented caveat: workloads that share a node with the container runtime must declare `processAllowed` for the runtime’s `comm`s.
 - Repeated-drift escalation: `<frequency>8 / <timeframe>120</timeframe>` child rules raise to `level="12"` for automated ticketing thresholds.
 
 ### 6.3 Workload scoping and Kubernetes attribution
@@ -396,6 +397,8 @@ DNS-name drift (Windows EID 22 shown): rule tests `sbob.dns_query` against the n
 | `kubernetes-api-access` | k8s audit-log rule at manager (§4.4) + connect drift to API CIDR | connect drift |
 | `binary-not-in-container-image` | Docker listener event + node audit correlate (overlay upper-layer exec) | EID 1 from user-writable paths |
 
+*(as implemented, M4)* — IDs per §6.1: module-load = `(6,0)` 100060, namespace-change = `(6,1)` 100061, process-tracing = `(6,2)` 100062, execution-from-memory = `(6,3)` 100063, manager JSON rule = `(6,4)` 100064 (k8s target only; fields `object.user.username` = `^system:serviceaccount:<namespace>:<name>$` and `object.objectRef.resource` = `^(?:secrets|configmaps)$`), sensitive-file-access = `(0,1)` 100001, service-account-token-access = `(0,2)` 100002, k8s-API-connect overlay = `(0,3)` 100003 (default service CIDR `10.96.0.0/12`), binary-not-in-image = `(0,4)` 100004 (informational correlate, level 3). Linux signature rules ship with the default pack whenever the SBoB omits `rulePolicies` (fire-by-default); Windows signature rules are **deferred** (coverage status `partial`, reason `SIG_WIN_DEFERRED`) — the EID 6/10/1 primitives above are the Phase-2 follow-up.
+
 ---
 
 ## 8. Coverage matrix and known gaps (Phase 1)
@@ -414,7 +417,9 @@ DNS-name drift (Windows EID 22 shown): rule tests `sbob.dns_query` against the n
 | `endpoints[]` (HTTP) | ❌ gap — requires L7 source (proxy/Envoy access logs or Suricata EVE JSON → Wazuh), Phase 2 | ❌ gap | ❌ gap |
 | `rulePolicies` | ✅ (§7.4) | ⚠️ per-rule | ✅ |
 
-**Absent vs. explicit-empty (spec §5.4):** absent section ⇒ no drift rules emitted (spec section "carries a different meaning" — absent is not NONE; behaviorally the transpiler treats absent as *unspecified*, emitting a coverage-manifest note `section-absent` and a low-level informational rule so operators notice an SBoB that under-specifies a workload). Explicit empty (`[]`, NONE) ⇒ drift rules with empty allowlist: **every** observed event of that class alerts. The linter requires an operator confirmation flag (`--confirm-none <section>`) for explicit-empty sections, since NONE is a very loud contract.
+**Absent vs. explicit-empty (spec §5.4):** absent section ⇒ no drift rules emitted (spec section "carries a different meaning" — absent is not NONE; behaviorally the transpiler treats absent as *unspecified*, emitting a coverage-manifest note `section-absent` and a low-level informational rule so operators notice an SBoB that under-specifies a workload). Explicit empty (`[]`, NONE) ⇒ drift rules with empty allowlist: **every** observed event of that class alerts. The linter requires an operator confirmation flag (`--confirm-none <section>`) for explicit-empty sections, since NONE is a very loud contract. For `rulePolicies` *(as implemented, M4)*, absent means the **default signature pack ships with fire-by-default semantics** (no exemptions), while explicit empty (`{}`, NONE) means no signature protection and requires `--confirm-none rulePolicies`.
+
+*(as implemented, M4)* the table above is the human summary; the **machine-generated matrix** (18 canonical rows × linux/windows/k8s with statuses `covered`/`partial`/`absent`/`gap`/`not-applicable` plus `REASON_CODES`) is emitted as the `coverage` key of every bundle manifest (`src/coverage.ts`: `buildCoverageMatrix`; `assertCoverageComplete` throws at codegen time, making the §11.4 completeness gate a build failure rather than a review checklist).
 
 ---
 
@@ -457,8 +462,8 @@ Source: `example/redis` SBoB (abridged) → Linux target.
 
 1. **Unit:** wildcard AST → PCRE2 golden tests over the spec §5 tables (including the spec's own match/does-not-match examples, e.g. `/etc/⋯` vs `/etc/ssh/sshd_config`).
 2. **Rule semantics:** `wazuh-logtest` replay corpus per OS: benign samples (must NOT alert) + drift samples (MUST alert) derived from each SBoB's expected intent.
-3. **Attack validation (false-negative checks, per spec §1.1):** upstream `bobctl simulate --suite example/redis-attacks.yaml` generates kill-chain traffic; where the suite targets Kubernetes/Kubescape, we derive equivalent Linux/Windows replay logs from captured runs and assert each attack step either alerts (detected) or appears in the coverage manifest as a documented blind spot. This is the direct analog of the SBoB spec's "test for false-negatives: each attack type can be verified as blind or detectable".
-4. **CI gates:** codegen determinism (twice-run byte diff), ID-collision check, PCRE2 size caps, coverage-manifest completeness (every section × OS has a status).
+3. **Attack validation (false-negative checks, per spec §1.1):** upstream `bobctl simulate --suite example/redis-attacks.yaml` generates kill-chain traffic; where the suite targets Kubernetes/Kubescape, we derive equivalent Linux/Windows replay logs from captured runs and assert each attack step either alerts (detected) or appears in the coverage manifest as a documented blind spot. This is the direct analog of the SBoB spec's "test for false-negatives: each attack type can be verified as blind or detectable". *(wired, M4)* the harness `scripts/attack-false-negative-check.ts` (`src/attackcheck.ts`) parses `docs/upstream-redis-attacks.yaml` and asserts every attack has a `docs/attack-matrix.md` row with a detection rule id or a documented blind class; it runs in CI and exits non-zero on any gap.
+4. **CI gates:** codegen determinism (twice-run byte diff), ID-collision check, PCRE2 size caps, coverage-manifest completeness (every section × OS has a status). *(wired, M4)* determinism runs as a byte-diff of two full CLI transpiles per target in the CI test job; ID-collision and PCRE2 budget are unit-tested against the allocator; coverage completeness is enforced at codegen time by `assertCoverageComplete` plus the §11.3 attack-harness step.
 
 ---
 
@@ -515,7 +520,7 @@ stateDiagram-v2
 | M1 | IR + linter + Linux codegen (execs/opens/egress) | golden tests green; `wazuh-logtest` corpus passes on a lab node |
 | M2 | Windows codegen (Sysmon EIDs 1/3/11/22; opens = file-create partial) | same, on a lab Windows host with Sysmon (`scripts/logtest-corpus.sh windows`) |
 | M3 | K8s attribution (Mode A default; cgroup decoder stretch) | redis attack suite matrix published (`docs/attack-matrix.md`) + `scripts/logtest-corpus.sh k8s` corpus on a lab k8s node |
-| M4 | rulePolicies signature rules + coverage manifest + CI gates | full §8 matrix machine-generated |
+| M4 | rulePolicies signature rules + coverage manifest + CI gates | full §8 matrix machine-generated — **delivered** (manifest `coverage` key, `assertCoverageComplete` build gate, determinism + attack-harness CI steps) |
 | M5 | Deploy-repo GitOps flow + ops runbook | production pilot on one workload |
 | M6 | Phase 2 codegen (Sigma, Velociraptor, MDE, Falco) | per-engine blind-spot matrix |
 | M7 | Phase 3 enforcement behind state machine | enforcement pilot in Audit mode |

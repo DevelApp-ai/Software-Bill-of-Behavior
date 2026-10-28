@@ -54,6 +54,15 @@ export function lintIR(ir: IR, opts: LintOptions): void {
     }
   }
 
+  // rulePolicies explicit-empty (M4): {} is NONE for the signature pack —
+  // same loud contract as the drift sections (defaults emitted fire-by-default)
+  if (ir.rulePolicies !== undefined && Object.keys(ir.rulePolicies).length === 0 && !opts.confirmNone.includes("rulePolicies")) {
+    throw new SbobError(
+      "ERR_NONE_UNCONFIRMED",
+      "section rulePolicies is explicitly empty (NONE: signature pack emitted with defaults, fire-by-default, no exemptions); pass --confirm-none rulePolicies to accept",
+    );
+  }
+
   // scope --------------------------------------------------------------------------
   if (opts.requireScope) {
     if (!ir.workload.name) throw new SbobError("ERR_MISSING_SCOPE", "workload has no name; agent-group scoping cannot be derived");
