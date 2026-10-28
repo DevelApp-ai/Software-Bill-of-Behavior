@@ -12,12 +12,13 @@ import { makeAllocator, parseRegistry, registryToYaml, slotFor, type SlotRegistr
 import { makeVerifier, type SignatureVerifier } from "./signature.ts";
 import { generateLinuxBundle, type BundleFile } from "./codegen/linux.ts";
 import { generateWindowsBundle } from "./codegen/windows.ts";
+import { generateK8sNodeBundle } from "./codegen/k8s.ts";
 import type { IR } from "./types.ts";
 
 export interface TranspileOptions {
   registryPath: string;
   outDir: string;
-  target: "linux" | "windows";
+  target: "linux" | "windows" | "k8s-node";
   skipSignatureVerify: boolean;
   confirmNone: string[];
 }
@@ -75,7 +76,9 @@ export async function transpile(sbobPaths: string[], opts: TranspileOptions): Pr
     const files =
       opts.target === "linux"
         ? generateLinuxBundle(ir, alloc)
-        : generateWindowsBundle(ir, alloc);
+        : opts.target === "windows"
+          ? generateWindowsBundle(ir, alloc)
+          : generateK8sNodeBundle(ir, alloc);
     for (const f of files) allFiles.push(f);
     workloads.push({ name: ir.workload.name, slot, files: files.map((f) => f.path) });
   }

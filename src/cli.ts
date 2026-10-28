@@ -4,7 +4,7 @@
  * Usage:
  *   node src/cli.ts transpile --sbob <file.yaml> [--sbob <file2.yaml>]
  *         [--registry docs/sbob-registry.yaml] [--out dist/bundle]
- *         [--target linux|windows] [--skip-signature-verify] [--confirm-none execs,opens]
+ *         [--target linux|windows|k8s-node] [--skip-signature-verify] [--confirm-none execs,opens]
  *   node src/cli.ts validate --sbob <file.yaml> [--confirm-none execs,opens]
  */
 import { readFileSync } from "node:fs";
@@ -27,7 +27,7 @@ options:
   --sbob <path>                 SBoB YAML file (repeatable for transpile)
   --registry <path>             workload slot registry (default docs/sbob-registry.yaml)
   --out <dir>                   bundle output directory (default dist/bundle)
-  --target <name>               codegen target: linux (M1), windows (M2)
+  --target <name>               codegen target: linux (M1), windows (M2), k8s-node (M3)
   --skip-signature-verify       skip SBoB signature verification (development profiles only)
   --confirm-none <section,...>  accept explicitly-empty (NONE) sections
 `);
@@ -84,14 +84,14 @@ async function main(): Promise<void> {
   try {
     if (args.command === "transpile") {
       if (args.sbob.length === 0) usage();
-      if (args.target !== "linux" && args.target !== "windows") {
-        console.error(`target "${args.target}" is not available (targets: linux, windows)`);
+      if (args.target !== "linux" && args.target !== "windows" && args.target !== "k8s-node") {
+        console.error(`target "${args.target}" is not available (targets: linux, windows, k8s-node)`);
         exit(2);
       }
       const result = await transpile(args.sbob, {
         registryPath: args.registry,
         outDir: args.out,
-        target: args.target as "linux" | "windows",
+        target: args.target as "linux" | "windows" | "k8s-node",
         skipSignatureVerify: args.skipSignatureVerify,
         confirmNone: args.confirmNone,
       });

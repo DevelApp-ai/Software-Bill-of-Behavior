@@ -1,6 +1,6 @@
 # SBoB → Wazuh Transpiler — Technical Design Specification
 
-**Version:** 1.2-draft · **Date:** 2026-10-28 · **Status:** Proposed (M1 + M2 implementation deviations folded in)
+**Version:** 1.3-draft · **Date:** 2026-10-28 · **Status:** Proposed (M1 + M2 + M3 implementation deviations folded in)
 **Author:** Detection Engineering (DevelApp)
 **Source standard:** Software Bill of Behavior (SBoB), spec v0.0.4 ([spec](https://billofbehavior.com/bob/docs/spec/), [repo](https://github.com/k8sstormcenter/bob))
 **Target platform (Phase 1):** Wazuh 4.x — Windows hosts, Linux hosts, Kubernetes nodes
@@ -178,7 +178,7 @@ Sysmon (Sysinternals) with a curated config (e.g. SwiftOnSecurity-derived, trimm
 ### 4.4 Kubernetes collection
 
 - Wazuh agents run on **nodes** (DaemonSet or host install). Container syscalls are visible to node auditd — Mode A/B from §4.2 applies unchanged.
-- The **Docker listener module** (`wodle name="docker-listener"`) provides container start/stop/image events used for drift attribution and for the "binary not in container image" signature rule.
+- The **Docker listener module** (`wodle name="docker-listener"`) provides container start/stop/image events used for drift attribution and for the "binary not in container image" signature rule. *(as implemented, M3)* the lifecycle attribution rule chains off the **shipped** docker integration ruleset (`0560-docker_integration_rules.xml`, parent rule `87900`, json decoder, fields `docker.status` / `docker.Actor.Attributes.image`); the bundle's agent-conf fragment enables the wodle, and the manifest records the shipped-ruleset prerequisite. Container runtimes other than Docker (containerd/cri-o events) are an M4+ follow-up.
 - Kubernetes **API server audit log** is ingested at the manager for `kubernetes-api-access` rule support (distinct pipeline, syslog/webhook → manager port 1515/agentless; out of scope for syscall drift).
 
 ---
@@ -271,6 +271,7 @@ rule_id = 100000
   - `0–4` — **Linux / Kubernetes-node** rule kinds: `0` base, `1` drift, `2` sustained-drift escalation, `3` informational, `4` exemption. Linux and k8s-node share this band because k8s nodes run the Linux agent.
   - `5–9` — **Windows** rule kinds: `5` base, `6` drift, `7` sustained-drift escalation, `8` informational, `9` exemption. Windows gets its own band so a workload's Windows and Linux rules for the same section never collide within one slot.
 - **Windows secondary-drift allocation (as implemented in M2; amends the sketch above):** execs needs two drift rules (image + args) and egress needs two (ip/port + DNS-name), but a section's variant budget allows one rule per kind. The **base section (code 0)** therefore hosts the secondary drift rules: `(0,6)` = execs args drift (§7.3.4), `(0,7)` = egress DNS-name drift (EID 22); `(0,8)` = Sysmon-prerequisite health (EID 4 informational), `(0,5)` = the global Windows base (chains off shipped rule `61600`).
+- **Attribution section semantics (as implemented in M3; Linux/k8s variant band):** the attribution section (code 7) hosts four rules per workload: `(7,0)` = attribution base (level 0; auditd group + `sbob.pod_uid` field), `(7,1)` = podmap-unresolved (level 3; `not_match_key` on `sbob/k8s/podmap` — stale map indicator), `(7,2)` = reserved, `(7,3)` = weak-fallback (level 3; node-scoped Mode B keys), `(7,4)` = container lifecycle (level 3; chains off the shipped docker integration parent rule `87900`, `docker.status=start` + image-repo match).
 
 ### 6.2 Rule hierarchy (per workload)
 
@@ -311,6 +312,7 @@ Notes:
 - **Windows hosts:** same agent-group mechanism; `sbob.workload` set from group at decode time.
 - **Kubernetes:** attribution is the hard part. Three mechanisms, best-available ordered:
   1. **auditd ≥ 3.0 cgroup emission:** where the node's auditd emits the `cgroup=` field in SYSCALL records, the custom decoder extracts the cgroup path (`…/kubepods.slice/…-<pod-uid>.scope/…`) and maps pod UID → namespace/pod via a periodically refreshed lookup table (CDB list `sbob/k8s/podmap`, refreshed by a node-side script from the local container runtime). This yields true per-pod drift attribution.
+     - *(as implemented, M3)* pod UIDs are **hex UUIDs**, and the cgroup spelling varies by driver: cgroup v2/systemd escapes UID dashes as underscores (`…-pod0f3c8ed9_9d6b_…_1234.scope`), the cgroup v2 dash-variant keeps them (`…-pod0f3c8ed9-9d6b-…-1234.scope`), and cgroup v1 uses `/kubepods/<qos>/pod<uid>/<cid>/`. Three **sibling decoders** (all OS_Regex-safe — no character classes, no bounded quantifiers, no lookarheads) extract `sbob.pod_uid` from each form; the podmap refresh script (`scripts/sbob-podmap-refresh.sh`, crictl or docker backend) emits **both spellings per pod** because CDB lookups are exact-match.
   2. **exe-path scoping (Mode A):** audit rules filtered by `-F exe=` per §4.2 — the rule key itself carries the workload identity; attribution is implicit. Recommended default: container filesystems are overlayfs, and exec paths observed through `/proc`/audit `exe=` resolve inside the container's mount namespace, giving high-quality keys for non-wildcarded `execs[]`.
   3. **Fallback (no cgroup field, wildcarded execs):** alerts carry `sbob.workload=unknown-node-scope` and are labeled `attribution=weak` — triage accounts for possible host-process collision.
 - Egress/ingress `podSelector`/`namespaceSelector` entries cannot be evaluated from node telemetry without cluster context. For Phase 1, transpiler emits: literal/CIDR/dns parts as rules (fully enforced), and records `k8sPeer` entries in the coverage manifest as `partial — evaluated by Phase-3 NetworkPolicy diff` (§14.3).
@@ -377,7 +379,7 @@ DNS-name drift (Windows EID 22 shown): rule tests `sbob.dns_query` against the n
 ### 7.3 Custom decoders (implementation work items)
 
 1. **`sbob-connect` saddr decoder (Linux):** parse `saddr=0x…` from connect SYSCALL records → `sbob.dst_ip`, `sbob.dst_port`, `sbob.direction`. (Shipped audit decoders do not fully cover AF_INET sockaddr unpacking for this use case.)
-2. **cgroup attribution decoder (k8s):** extract `cgroup=` from SYSCALL records → `sbob.pod_uid`; join against `sbob/k8s/podmap` in a `<list lookup="match_key_value">` context rule to stamp `sbob.pod`/`sbob.namespace`.
+2. **cgroup attribution decoder (k8s):** extract `cgroup=` from SYSCALL records → `sbob.pod_uid`; join against `sbob/k8s/podmap` in a `<list lookup="match_key_value">` context rule to stamp `sbob.pod`/`sbob.namespace`. *(as implemented, M3 — deviation:)* Wazuh rules **cannot inject CDB list values into alert fields** (list lookups are boolean membership/address assertions only, `wazuh/src/analysisd/lists.c`), so "stamping" is delivered differently: the decoders carry `sbob.pod_uid` on every alert, the podmap's value column (`namespace/podname`) serves as the triage lookup, and the rules *assert* map membership — `(7,1)` fires `not_match_key` when the uid is absent (stale map), silence of `(7,1)` plus presence of the uid means tier-1 attribution resolved.
 3. **open-flags reconstruction (Linux):** map `openat` a1 flags bitmask → `O_*` set for `sbob.open_flags` (needed for flag-aware opens drift).
 4. **Sysmon arg normalization (Windows):** Sysmon EID 1 gives `CommandLine` (one string), not argv. The transpiler compiles `args[]` ASTs into **token-aware command-line regexes** (`argv[0]` anchored at string start, `⋯⋯` → `(?: .*)?`, quoting variants tolerated) and documents the residual gap: Windows drift on args is *heuristic-equivalent*, flagged `partial` in the coverage manifest.
 
@@ -512,7 +514,7 @@ stateDiagram-v2
 |---|---|---|
 | M1 | IR + linter + Linux codegen (execs/opens/egress) | golden tests green; `wazuh-logtest` corpus passes on a lab node |
 | M2 | Windows codegen (Sysmon EIDs 1/3/11/22; opens = file-create partial) | same, on a lab Windows host with Sysmon (`scripts/logtest-corpus.sh windows`) |
-| M3 | K8s attribution (Mode A default; cgroup decoder stretch) | redis attack suite matrix published |
+| M3 | K8s attribution (Mode A default; cgroup decoder stretch) | redis attack suite matrix published (`docs/attack-matrix.md`) + `scripts/logtest-corpus.sh k8s` corpus on a lab k8s node |
 | M4 | rulePolicies signature rules + coverage manifest + CI gates | full §8 matrix machine-generated |
 | M5 | Deploy-repo GitOps flow + ops runbook | production pilot on one workload |
 | M6 | Phase 2 codegen (Sigma, Velociraptor, MDE, Falco) | per-engine blind-spot matrix |

@@ -1,0 +1,43 @@
+{
+  "workload": {
+    "name": "redis",
+    "namespace": "cache-tier",
+    "imageID": "docker.io/library/redis@sha256:e508c66a2e1d5d5f8d16b1bbf85e6c1c19b9e5c4c5d1e3f7e5a9d7d0f8e3f4d2",
+    "sbobVersion": "0.0.4",
+    "scope": {
+      "linuxGroups": [
+        "sbob-redis"
+      ],
+      "windowsGroups": [
+        "sbob-redis"
+      ],
+      "k8s": {
+        "namespace": "cache-tier",
+        "imageID": "docker.io/library/redis@sha256:e508c66a2e1d5d5f8d16b1bbf85e6c1c19b9e5c4c5d1e3f7e5a9d7d0f8e3f4d2"
+      }
+    }
+  },
+  "target": "k8s-node",
+  "files": [
+    "wazuh/audit/sbob/redis.rules",
+    "wazuh/lists/sbob/redis/execs",
+    "wazuh/lists/sbob/redis/opens",
+    "wazuh/lists/sbob/redis/egress_addrs",
+    "wazuh/lists/sbob/redis/ingress_addrs",
+    "wazuh/lists/sbob/k8s/podmap",
+    "wazuh/decoders/sbob/redis-k8s.xml",
+    "wazuh/agent-conf/sbob/redis-k8s.xml",
+    "wazuh/rules/sbob/100000_redis_k8s-node.xml",
+    "wazuh/manager/sbob/k8s-api-audit.md"
+  ],
+  "coverageNotes": [
+    "ingress: Linux accept() telemetry cannot attribute peers; drift rules emitted but require host-firewall or accept-path decoder validation (TDS 8)",
+    "capabilities: section-absent",
+    "k8s: attribution tiers per TDS 6.3 — 1 cgroup+podmap (auditd >= 3.0), 2 Mode A exe-scoped keys (default), 3 weak fallback (attribution=weak)",
+    "k8s: podmap (sbob/k8s/podmap) is node runtime data maintained by scripts/sbob-podmap-refresh.sh; not derived from the SBoB",
+    "k8s: docker-listener lifecycle rule requires the shipped integration ruleset (parent rule 87900)",
+    "k8s: DNS-name egress entries are not observable from node auditd telemetry — Windows agents detect them via Sysmon EID 22 (TDS 8)",
+    "k8s: kubernetes-api-access signature rule lands with M4 (rulePolicies); this bundle delivers the manager-side ingestion path only"
+  ],
+  "labValidation": "pending"
+}

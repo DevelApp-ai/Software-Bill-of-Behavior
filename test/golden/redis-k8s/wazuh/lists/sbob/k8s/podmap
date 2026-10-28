@@ -1,0 +1,8 @@
+# sbob k8s podmap — node runtime data (NOT derived from the SBoB; do not edit by hand).
+# key   = pod uid as it appears in cgroup paths (hex UUID); the refresh script
+#         emits BOTH forms — pod<uid-underscores>.scope (cgroup v2/systemd,
+#         kubelet escapes dashes) and pod<uid-dashes> (cgroup v2 dash-variant + v1)
+#         — because CDB lookups are exact-match; keep both lines per pod.
+# value = namespace/podname (carried for triage; TDS 6.3 tier 1)
+# maintained by scripts/sbob-podmap-refresh.sh (crictl or docker backend);
+# the manager loads it as a CDB list — restart the manager after refresh.

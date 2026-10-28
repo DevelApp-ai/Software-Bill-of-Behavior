@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# Lab validation harness (M1/M2 exit criteria, issues #2/#3)
+# Lab validation harness (M1/M2/M3 exit criteria, issues #2/#3/#4)
 #
 # Feeds the benign/drift corpora through a live Wazuh manager running the
 # generated bundle, and asserts:
@@ -11,17 +11,31 @@
 #                 drift corpus   -> 100016 (exec image), 100006 (args, TDS 7.3.4),
 #                                   100026 (file create), 100036 (egress),
 #                                   100007 (dns query, EID 22)
+#   k8s     (M3): benign corpus  -> ZERO drift alerts (attribution info rules
+#                                   100070/100071 MAY fire — they are level 0/3
+#                                   attribution, not drift)
+#                 drift corpus   -> 100011 (exec), 100021 (open), 100031 (connect);
+#                                   attribution: 100071 (podmap not seeded) is
+#                                   expected on a fresh install — seed the
+#                                   podmap with the corpus pod uid via
+#                                   scripts/sbob-podmap-refresh.sh (or append
+#                                   "0f3c8ed9-9d6b-4a1c-b5f2-7c1e0a9d1234:cache-tier/redis"
+#                                   plus the underscore spelling) and rerun to
+#                                   watch 100071 fall silent (tier-1 resolved)
 #
 # Usage (on the lab Wazuh manager, or anywhere with wazuh-logtest):
-#   ./scripts/logtest-corpus.sh [linux|windows]     # default: linux
+#   ./scripts/logtest-corpus.sh [linux|windows|k8s]     # default: linux
 #
 # Requires: the bundle from `node src/cli.ts transpile --sbob sbobs/redis.yaml
-# --out <dir> --target <linux|windows>` to be installed as a test ruleset the
-# manager loads (rules/decoders/lists under etc/ossec.conf <ruleset> or the
-# manager's active-response test instance). The windows target additionally
-# requires the shipped ruleset (0595-win-sysmon_rules.xml, parent rule 61600)
-# and Wazuh >= 4.4 (type="pcre2" field attribute). wazuh-logtest reads the
-# manager's live ruleset; it does not take a rules path argument.
+# --out <dir> --target <linux|windows|k8s-node>` to be installed as a test
+# ruleset the manager loads (rules/decoders/lists under etc/ossec.conf
+# <ruleset> or the manager's active-response test instance). The windows
+# target additionally requires the shipped ruleset (0595-win-sysmon_rules.xml,
+# parent rule 61600) and Wazuh >= 4.4 (type="pcre2" field attribute). The k8s
+# target additionally requires the docker-listener integration ruleset
+# (0560-docker_integration_rules.xml, parent rule 87900) for rule 100074.
+# wazuh-logtest reads the manager's live ruleset; it does not take a rules
+# path argument.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -39,8 +53,14 @@ case "$TARGET" in
     DRIFT="$CORPUS_DIR/redis-drift.win.jsonl"
     DRIFT_IDS=(100016 100006 100026 100036 100007)
     ;;
+  k8s)
+    BENIGN="$CORPUS_DIR/redis-benign.k8s.audit"
+    DRIFT="$CORPUS_DIR/redis-drift.k8s.audit"
+    DRIFT_IDS=(100011 100021 100031)
+    ATTR_IDS=(100070 100071 100073 100074)
+    ;;
   *)
-    echo "ERROR: unknown target \"$TARGET\" (expected linux or windows)" >&2
+    echo "ERROR: unknown target \"$TARGET\" (expected linux, windows or k8s)" >&2
     exit 2
     ;;
 esac
@@ -51,12 +71,28 @@ command -v wazuh-logtest >/dev/null 2>&1 || {
 }
 
 echo "== [$TARGET] benign corpus: expecting NO drift alerts =="
-if cat "$BENIGN" | wazuh-logtest 2>/dev/null | tee /tmp/sbob-benign.out \
-   | grep -E 'Rule id: 1000[0-9]{2}'; then
-  echo "FAIL: benign events fired an sbob rule — see /tmp/sbob-benign.out" >&2
-  exit 1
+cat "$BENIGN" | wazuh-logtest 2>/dev/null | tee /tmp/sbob-benign.out || true
+for id in "${DRIFT_IDS[@]}"; do
+  if grep -q "Rule id: $id" /tmp/sbob-benign.out; then
+    echo "FAIL: benign corpus fired drift rule $id — see /tmp/sbob-benign.out" >&2
+    case "$TARGET" in
+      linux)
+        echo "      check decoder chain (sbob.key/exe/path/saddr fields) and CDB list loading" >&2 ;;
+      windows)
+        echo "      check the shipped sysmon parent rule 61600 is loaded and the" >&2
+        echo "      eventchannel decoder emits win.system.eventID / win.eventdata.*" >&2 ;;
+      k8s)
+        echo "      check the cgroup decoders (sbob-*-audit-cgroup*) and that the" >&2
+        echo "      auditd cgroup= lines are intact" >&2 ;;
+    esac
+    exit 1
+  fi
+done
+echo "OK: benign corpus fired no drift rules"
+if [ "$TARGET" = "k8s" ]; then
+  grep -E 'Rule id: 1000(70|71|73|74)' /tmp/sbob-benign.out || true \
+    | sed 's/^/  (attribution info, allowed): /'
 fi
-echo "OK: benign corpus is silent"
 
 echo "== [$TARGET] drift corpus: expecting ${DRIFT_IDS[*]} =="
 cat "$DRIFT" | wazuh-logtest 2>/dev/null | tee /tmp/sbob-drift.out || true
@@ -69,11 +105,28 @@ for id in "${DRIFT_IDS[@]}"; do
       windows)
         echo "      check the shipped sysmon parent rule 61600 is loaded and the" >&2
         echo "      eventchannel decoder emits win.system.eventID / win.eventdata.*" >&2 ;;
+      k8s)
+        echo "      check decoder chain (sbob.key/exe/path/saddr fields), the cgroup" >&2
+        echo "      decoders, and CDB list loading" >&2 ;;
     esac
     exit 1
   fi
   echo "OK: rule $id fired"
 done
+
+if [ "$TARGET" = "k8s" ]; then
+  echo "== [k8s] attribution check (informational — not a hard gate) =="
+  if grep -qE 'Rule id: 1000(70|71|73|74)' /tmp/sbob-drift.out; then
+    echo "OK: attribution chain fired (see above). 100071 means the podmap does"
+    echo "    not contain the corpus pod uid yet — run scripts/sbob-podmap-refresh.sh"
+    echo "    (it emits both cgroup spellings), reload the manager, rerun and expect"
+    echo "    100071 to fall silent (tier-1 attribution resolved)."
+  else
+    echo "NOTE: no attribution rule fired — expected when the podmap IS seeded"
+    echo "      (tier-1 resolved: 100070 alone is level 0 and does not alert) or"
+    echo "      when the cgroup= field is missing on the audit lines."
+  fi
+fi
 
 echo
 echo "PASS ($TARGET): lab validation succeeded — update the manifest labValidation field"
