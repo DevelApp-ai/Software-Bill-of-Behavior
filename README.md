@@ -16,7 +16,7 @@ Monitor **Linux**, **Windows**, and **Kubernetes** deployments from one declared
 | M6 | Phase 2 codegen: `--target sigma` (auditd execve/open/connect + Sysmon EID 1/3/11/22 filter-block rules, deterministic v5 UUIDs), `--target velociraptor` (RE2-safe pslist/netstat conformance sweeps), `--target mde` (DeviceProcessEvents/DeviceFileEvents/DeviceNetworkEvents KQL hunts), `--target falco` (list-based drift rules + DaemonSet + Falcosidekick→Wazuh correlation rule 100103), Envoy `endpoints[]` ingestion ((9,1)/(9,2) manager-side rules) and the per-engine blind-spot matrix ([docs/engine-matrix.md](docs/engine-matrix.md), CI-gated) — implemented, lab validation pending | [#7](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/7) |
 | M7 | Phase 3 enforcement behind a Monitor→Audit→Enforce state machine: `sbobctl enforce` (committed per-workload state file with safety gates — enforce requires an incident-free audit window, the ladder may not skip rungs), seccomp (OCI profile / systemd `SystemCallFilter`), AppArmor profiles, Kubernetes NetworkPolicy with declared-vs-enforced np-diff (closes the podSelector/namespaceSelector gap), Windows AppLocker, Wazuh active responses (process-kill / firewall-drop, disabled by default with a flip-to-yes kill-switch) and enforcement telemetry (rule (11,1) `100111` on the `sbob-enforce.log` localfile) — implemented, enforcement pilot in Audit mode pending | [#8](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/8) |
 | M8 | SBoB semantic diff gate: scored release deltas (`sbobctl diff`) | [#13](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/13) |
-| M9 | Release profiler: observed-behavior → SBoB redraft assist (outline) | [#14](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/14) |
+| M9 | Observability bootstrap profiler: derive candidate SBoB from a window of normalized `sbob.*` telemetry (`sbobctl profile`) — candidate + provenance sidecar, disposition taxonomy, taint quarantine, M8 gate integration; implemented, lab validation pending | [#14](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/14) |
 
 ## How it works
 
@@ -83,10 +83,21 @@ node src/cli.ts diff --old releases/webcache-1.2.yaml --new releases/webcache-1.
 # phase-3 enforcement bundle (M7): state file gates the Monitor→Audit→Enforce ladder;
 # --enforced-np optionally diffs the declared SBoB against the live NetworkPolicy (exit 1 on drift)
 node src/cli.ts enforce --sbob sbobs/redis.yaml --state releases/redis.state.yaml --out dist/enforce-k8s --target k8s-node --registry docs/sbob-registry.yaml --skip-signature-verify
+
+# derive a candidate SBoB from a normalized sbob.* event window (M9; exits 1 when
+# quarantined or nothing is declarable — the odd-behavior review queue is the output)
+node src/cli.ts profile --events windows/legacy-cache.jsonl --workload legacy-cache \
+  --image "docker.io/legacy/cache@sha256:…" --k8s-namespace legacy-tier \
+  --window-days 30 --dispositions review.json --baseline releases/legacy-cache.yaml \
+  --out-dir dist/profile
 ```
 
 Workload rule IDs are derived deterministically from the slot registry (`docs/sbob-registry.yaml`):
 `rule_id = 100000 + slot*100 + section_code*10 + variant` — see [TDS §6.1](docs/TDS.md).
+
+## The derivation loop (M9)
+
+Most real-world workloads ship no vendor SBoB. The profiler is the on-ramp for them: it consumes a window of **normalized `sbob.*` events** (the same field contract the drift decoders emit — JSONL), clusters them per workload × section, classifies every entry **steady · periodic · sporadic · one-off** (calibratable thresholds), applies the mandatory disposition taxonomy (**declare · hold · exempt-with-expiry · investigate** — no "no decision" states), and emits a candidate SBoB plus a provenance sidecar for human review. Kernel/runtime telemetry (`auditd`, `sysmon`, `ebpf`) is the only confirming source — entries seen only by flow logs or app logs are marked unverified and excluded. Workloads with open incident labels are quarantined: no candidate until remediated. A reviewer who overrides a held or investigated entry to `declare` must write the reason, or the run fails — **no unexplained observation becomes a plain allow.** With `--baseline`, the candidate's first reviewed delta scores through the M8 diff gate. See [TDS §17](docs/TDS.md).
 
 ## Repository layout
 

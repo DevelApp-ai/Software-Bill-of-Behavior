@@ -1,0 +1,23 @@
+# Prior-release contract for legacy-cache (hand-written, pre-profiler era).
+# Used as the M8 diff-gate baseline: the derived candidate's delta against
+# this contract is what a reviewer signs in the draft PR.
+apiVersion: sbob.k8sstormcenter.io/v1
+kind: SoftwareBillOfBehavior
+metadata:
+  name: legacy-cache
+  namespace: legacy-tier
+spec:
+  imageID: docker.io/legacy/cache@sha256:c0ffee00000000000000000000000000000000000000000000000000000000ff
+  execs:
+  - path: /usr/bin/legacy-cache
+  opens:
+  - path: /var/lib/legacy-cache/data.db
+    flags: [O_RDWR, O_CREAT]
+  - path: /etc/legacy-cache/config.conf
+    flags: [O_RDONLY]
+  egress:
+  - ipAddresses:
+    - 10.2.0.7
+    ports:
+    - protocol: TCP
+      port: 6379

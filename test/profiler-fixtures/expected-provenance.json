@@ -1,0 +1,305 @@
+{
+  "workload": {
+    "name": "legacy-cache",
+    "namespace": "legacy-tier",
+    "imageID": "docker.io/legacy/cache@sha256:c0ffee00000000000000000000000000000000000000000000000000000000ff"
+  },
+  "window": {
+    "days": 30,
+    "from": "2026-09-01T02:30:00Z",
+    "to": "2026-09-30T06:00:05Z"
+  },
+  "derivedBy": "sbobctl profile v1 (M9)",
+  "honesty": "An SBoB derived from an N-day window is exactly what that workload did for N days, no more. The drift loop catches the rest.",
+  "status": "candidate",
+  "quarantined": false,
+  "frequencyThresholds": {
+    "steadyCutoff": "0.5 (dayRatio at or above -> steady)",
+    "sporadicCutoff": "0.05 (dayRatio below -> sporadic)",
+    "cadenceTolerance": "0.25 (day-gap regularity band for periodic)"
+  },
+  "entries": [
+    {
+      "section": "capabilities",
+      "key": "CAP_NET_BIND_SERVICE",
+      "sources": [
+        "auditd"
+      ],
+      "confirmed": true,
+      "count": 30,
+      "firstSeen": "2026-09-01T06:00:05Z",
+      "lastSeen": "2026-09-30T06:00:05Z",
+      "daysSeen": 30,
+      "dayRatio": 1,
+      "class": "steady",
+      "disposition": "declare",
+      "dispositionOrigin": "taxonomy-default",
+      "included": true
+    },
+    {
+      "section": "egress",
+      "key": "dns:cache-updates.example.com",
+      "sources": [
+        "auditd"
+      ],
+      "confirmed": true,
+      "count": 2,
+      "firstSeen": "2026-09-05T09:00:00Z",
+      "lastSeen": "2026-09-17T09:00:00Z",
+      "daysSeen": 2,
+      "dayRatio": 0.0667,
+      "class": "sporadic",
+      "disposition": "hold",
+      "dispositionOrigin": "taxonomy-default",
+      "included": false,
+      "detail": "ports: 443"
+    },
+    {
+      "section": "egress",
+      "key": "dns:telemetry-vendor.io",
+      "sources": [
+        "flow"
+      ],
+      "confirmed": false,
+      "count": 3,
+      "firstSeen": "2026-09-02T11:00:00Z",
+      "lastSeen": "2026-09-22T11:00:00Z",
+      "daysSeen": 3,
+      "dayRatio": 0.1,
+      "class": "periodic",
+      "periodDays": 10,
+      "disposition": "declare",
+      "dispositionOrigin": "taxonomy-default",
+      "included": false,
+      "detail": "ports: 443"
+    },
+    {
+      "section": "egress",
+      "key": "ip:10.2.0.7",
+      "sources": [
+        "auditd"
+      ],
+      "confirmed": true,
+      "count": 30,
+      "firstSeen": "2026-09-01T06:00:03Z",
+      "lastSeen": "2026-09-30T06:00:03Z",
+      "daysSeen": 30,
+      "dayRatio": 1,
+      "class": "steady",
+      "disposition": "declare",
+      "dispositionOrigin": "taxonomy-default",
+      "included": true,
+      "detail": "ports: 6379"
+    },
+    {
+      "section": "egress",
+      "key": "ip:203.0.113.9",
+      "sources": [
+        "auditd"
+      ],
+      "confirmed": true,
+      "count": 1,
+      "firstSeen": "2026-09-27T03:13:37Z",
+      "lastSeen": "2026-09-27T03:13:37Z",
+      "daysSeen": 1,
+      "dayRatio": 0.0333,
+      "class": "one-off",
+      "disposition": "investigate",
+      "dispositionOrigin": "reviewer",
+      "reason": "unexplained external egress; INC-78 opened — never enters the contract as a plain allow",
+      "included": false,
+      "detail": "ports: 8443"
+    },
+    {
+      "section": "execs",
+      "key": "/bin/sh",
+      "sources": [
+        "auditd"
+      ],
+      "confirmed": true,
+      "count": 3,
+      "firstSeen": "2026-09-03T07:15:00Z",
+      "lastSeen": "2026-09-27T07:15:00Z",
+      "daysSeen": 3,
+      "dayRatio": 0.1,
+      "class": "sporadic",
+      "disposition": "hold",
+      "dispositionOrigin": "reviewer",
+      "reason": "health-check shell-outs; verify the owning job before declaring",
+      "included": false
+    },
+    {
+      "section": "execs",
+      "key": "/usr/bin/cache-migrate",
+      "sources": [
+        "auditd"
+      ],
+      "confirmed": true,
+      "count": 1,
+      "firstSeen": "2026-09-20T15:00:00Z",
+      "lastSeen": "2026-09-20T15:00:00Z",
+      "daysSeen": 1,
+      "dayRatio": 0.0333,
+      "class": "one-off",
+      "disposition": "declare",
+      "dispositionOrigin": "reviewer",
+      "reason": "one-time v2-to-v3 migration tool, run intentionally during the window; documented in INC-77",
+      "included": true,
+      "detail": "args stable: [--to, v3]"
+    },
+    {
+      "section": "execs",
+      "key": "/usr/bin/legacy-cache",
+      "sources": [
+        "auditd"
+      ],
+      "confirmed": true,
+      "count": 30,
+      "firstSeen": "2026-09-01T06:00:00Z",
+      "lastSeen": "2026-09-30T06:00:00Z",
+      "daysSeen": 30,
+      "dayRatio": 1,
+      "class": "steady",
+      "disposition": "declare",
+      "dispositionOrigin": "taxonomy-default",
+      "included": true,
+      "detail": "args stable: [--daemon]"
+    },
+    {
+      "section": "execs",
+      "key": "/usr/bin/legacy-cache-check",
+      "sources": [
+        "auditd"
+      ],
+      "confirmed": true,
+      "count": 2,
+      "firstSeen": "2026-09-02T05:00:00Z",
+      "lastSeen": "2026-09-18T05:00:00Z",
+      "daysSeen": 2,
+      "dayRatio": 0.0667,
+      "class": "sporadic",
+      "disposition": "hold",
+      "dispositionOrigin": "taxonomy-default",
+      "included": false,
+      "detail": "args vary across observations (2 variants); entry emitted path-only"
+    },
+    {
+      "section": "ingress",
+      "key": "ip:10.2.0.9",
+      "sources": [
+        "auditd"
+      ],
+      "confirmed": true,
+      "count": 30,
+      "firstSeen": "2026-09-01T06:00:04Z",
+      "lastSeen": "2026-09-30T06:00:04Z",
+      "daysSeen": 30,
+      "dayRatio": 1,
+      "class": "steady",
+      "disposition": "declare",
+      "dispositionOrigin": "taxonomy-default",
+      "included": true,
+      "detail": "ports: 6379"
+    },
+    {
+      "section": "opens",
+      "key": "/etc/legacy-cache/config.conf",
+      "sources": [
+        "auditd"
+      ],
+      "confirmed": true,
+      "count": 30,
+      "firstSeen": "2026-09-01T06:00:02Z",
+      "lastSeen": "2026-09-30T06:00:02Z",
+      "daysSeen": 30,
+      "dayRatio": 1,
+      "class": "steady",
+      "disposition": "declare",
+      "dispositionOrigin": "taxonomy-default",
+      "included": true,
+      "detail": "flags union: O_RDONLY"
+    },
+    {
+      "section": "opens",
+      "key": "/tmp/.cache-stamp",
+      "sources": [
+        "auditd"
+      ],
+      "confirmed": true,
+      "count": 3,
+      "firstSeen": "2026-09-09T13:00:00Z",
+      "lastSeen": "2026-09-09T13:00:10Z",
+      "daysSeen": 1,
+      "dayRatio": 0.0333,
+      "class": "sporadic",
+      "disposition": "exempt-with-expiry",
+      "dispositionOrigin": "reviewer",
+      "reason": "cache-stamp retry path under load; watch one more window, auto-expire if it never recurs",
+      "expiry": "2026-12-31",
+      "included": true,
+      "detail": "flags union: O_RDONLY (some events carried no normalized flags)"
+    },
+    {
+      "section": "opens",
+      "key": "/var/backups/legacy-cache.bak",
+      "sources": [
+        "auditd"
+      ],
+      "confirmed": true,
+      "count": 5,
+      "firstSeen": "2026-09-01T02:30:00Z",
+      "lastSeen": "2026-09-29T02:30:00Z",
+      "daysSeen": 5,
+      "dayRatio": 0.1667,
+      "class": "periodic",
+      "periodDays": 7,
+      "disposition": "declare",
+      "dispositionOrigin": "taxonomy-default",
+      "included": true,
+      "detail": "flags union: O_WRONLY"
+    },
+    {
+      "section": "opens",
+      "key": "/var/lib/legacy-cache/data.db",
+      "sources": [
+        "auditd"
+      ],
+      "confirmed": true,
+      "count": 30,
+      "firstSeen": "2026-09-01T06:00:01Z",
+      "lastSeen": "2026-09-30T06:00:01Z",
+      "daysSeen": 30,
+      "dayRatio": 1,
+      "class": "steady",
+      "disposition": "declare",
+      "dispositionOrigin": "taxonomy-default",
+      "included": true,
+      "detail": "flags union: O_RDWR|O_CREAT"
+    }
+  ],
+  "annotations": [
+    {
+      "source": "applog",
+      "kind": "note",
+      "ts": "2026-09-01T12:00:00Z",
+      "text": "nightly compaction job writes /var/backups/legacy-cache.bak"
+    },
+    {
+      "source": "applog",
+      "kind": "note",
+      "ts": "2026-09-02T12:00:00Z",
+      "text": "cache warm-up reconnects to shard 10.2.0.7 after restarts"
+    },
+    {
+      "source": "metric",
+      "kind": "note",
+      "ts": "2026-09-25T12:00:00Z",
+      "text": "egress connection count to 10.2.0.7 doubled during load test"
+    }
+  ],
+  "gate": {
+    "score": 13,
+    "verdict": "mandatory",
+    "immediateReview": true
+  }
+}

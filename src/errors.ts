@@ -14,7 +14,10 @@ export type SbobErrorCode =
   | "ERR_SECTION_CAP"
   | "ERR_YAML_PARSE"
   | "ERR_ENFORCE_STATE_INVALID"
-  | "ERR_ENFORCE_NOT_AUDITED";
+  | "ERR_ENFORCE_NOT_AUDITED"
+  | "ERR_PROFILE_EVENT"
+  | "ERR_PROFILE_SCOPE"
+  | "ERR_PROFILE_DISPOSITION";
 
 export class SbobError extends Error {
   readonly code: SbobErrorCode;
