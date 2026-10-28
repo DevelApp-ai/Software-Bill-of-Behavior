@@ -1,6 +1,6 @@
 # SBoB → Wazuh Transpiler — Technical Design Specification
 
-**Version:** 1.0-draft · **Date:** 2026-10-28 · **Status:** Proposed
+**Version:** 1.1-draft · **Date:** 2026-10-28 · **Status:** Proposed (M1 implementation deviations folded in)
 **Author:** Detection Engineering (DevelApp)
 **Source standard:** Software Bill of Behavior (SBoB), spec v0.0.4 ([spec](https://billofbehavior.com/bob/docs/spec/), [repo](https://github.com/k8sstormcenter/bob))
 **Target platform (Phase 1):** Wazuh 4.x — Windows hosts, Linux hosts, Kubernetes nodes
@@ -92,9 +92,9 @@ flowchart TD
 
 | Component | Form | Responsibility |
 |---|---|---|
-| `sbobctl transpile` | CLI (extends upstream `bobctl` or standalone Go tool) | SBoB → IR → engine-specific artifacts |
-| IR (Intermediate Representation) | YAML, versioned (`irVersion: 1`) | Engine-neutral model: per-section entries with wildcard ASTs, scope metadata, rule-policy statements |
-| `wazuh-gen` | Codegen module | IR → rules XML, decoders XML, CDB lists, audit.rules, agent.conf fragments |
+| `sbobctl transpile` | Standalone **zero-dependency Node/TypeScript CLI** (Node ≥ 22 native type stripping; no npm dependencies — as implemented in M1; replaces the original "extends upstream `bobctl` / Go tool" sketch) | SBoB → IR → engine-specific artifacts |
+| IR (Intermediate Representation) | TypeScript types, versioned (`irVersion: 1`) | Engine-neutral model: per-section entries with wildcard ASTs, scope metadata, rule-policy statements |
+| `wazuh-gen` | Codegen module (`src/codegen/*`) | IR → rules XML, decoders XML, CDB lists, audit.rules, agent.conf fragments |
 | Coverage manifest | JSON in bundle | Section × OS → `covered` / `partial` / `not-applicable` / `gap`, with reason codes |
 | Deploy repo | Git | Bundle artifacts reviewed via PR; Wazuh manager pulls via existing configuration management |
 
@@ -222,19 +222,19 @@ The single source of translation truth, used by all regex emitters (Wazuh now, S
 
 | SBoB token (context) | Meaning | PCRE2 fragment (full-match anchored) |
 |---|---|---|
-| literal path segment | byte equality | `\Qsegment\E` |
+| literal path segment | byte equality | escaped literal (see escaping note below) |
 | `⋯` mid-path | exactly 1 segment | `[^/]+` |
 | `*` mid-path | 0+ segments | `(?:[^/]+/)*` |
 | `*` trailing | 1+ segments | `[^/]+(?:/[^/]+)*` |
-| `⋯` in `args` | exactly 1 argv token | `\S+` (token-level matching, §7.4.2) |
-| `⋯⋯` in `args` | 0+ argv tokens | `.*` (token-level, §7.4.2) |
-| literal `*` in `args` | literal asterisk | `\*\E` (escaped) |
+| `⋯` in `args` | exactly 1 argv token | ` \S+` (space-joined token; argv[0] anchored at string start, §7.4.2) |
+| `⋯⋯` in `args` | 0+ argv tokens | `(?: \S+)*` (token-level, §7.4.2) |
+| literal `*` in `args` | literal asterisk | ` \*` (escaped literal) |
 | DNS `*.suffix.` | exactly one label before suffix | `[^.]+\.suffix\.` |
 | DNS `a.⋯.b.` | one label between | `a\.[^.]+\.b\.` |
 | DNS `prefix.*.` | 1+ trailing labels | `prefix\.(?:[^.]+\.?)+` |
 | IP literal / CIDR / `*` | see §7.2 | compiled to CDB address list, not regex |
 
-**Full-match anchoring rule:** every compiled pattern is emitted as `(?:…)` inside an alternation group; the consuming condition anchors with `^…$`.
+**Escaping note (implemented):** `\Q…\E` quoting is deliberately **not** used in emitted fragments. The transpiler escapes literal characters with a standard escapeRegExp routine, producing fragments with identical semantics in PCRE2 and JavaScript RegExp — so the unit-test suite verifies emitted semantics directly with JS `RegExp`, and the emitted ruleset stays portable. Alternations are always wrapped in a non-capturing group before anchoring: positive `^(?:(?:p1|p2))$`, negated `^(?!(?:p1|p2)$)` — the grouping is load-bearing, since without it the `$` would bind to the last alternative only and partial prefixes would leak through the lookahead.
 
 **Combined allow-regex:** for a section with exact entries *E* and pattern entries *P*, the transpiler emits `ALLOW = (?:(?:e1|e2|…)?|(?:p1|p2|…))` — concretely `(?:(?:^e1$)|(?:^p1$)|…)`. When *P* is empty, no regex is emitted and a CDB list alone carries the allowlist. When *E* is empty, only the regex is emitted.
 
@@ -244,7 +244,7 @@ Wazuh rule conditions are AND-composed positive matches. "Value does not fully m
 
 ```xml
 <!-- fires iff exe is NOT in the allow alternation -->
-<field name="sbob.exe" regex="^(?!(?:(?:\Q/usr/bin/redis-server\E)|(?:\Q/bin/⋯…\E))$)"/>
+<field name="sbob.exe" regex="^(?!(?:/usr/bin/redis\-server|/bin/[^/]+)$)"/>
 ```
 
 Fallbacks if a deployment avoids PCRE2: OS_Regex cannot express negation; the fallback is CDB `not_match_key` for exact entries plus one child rule per pattern with `<if_negate>`-style suppression is **not** supported — therefore PCRE2 is a hard requirement for any SBoB section containing wildcards. The linter enforces this and will fail the build with `ERR_PCRE2_REQUIRED` on non-conforming targets.
@@ -262,12 +262,14 @@ rule_id = 100000
         + workload_slot × 100        # workload_slot = stable registry index (docs/sbob-registry.yaml)
         + section_code × 10          # 0 base, 1 execs, 2 opens, 3 egress, 4 ingress,
                                       # 5 capabilities, 6 rulePolicies, 7 attribution
-        + variant                     # 0..9 per-OS or per-entry variants
+        + variant                     # per-kind digit; layout below (implemented M1)
 ```
 
 - `workload_slot` is allocated once and never reused (registry is committed).
 - A collision (`ERR_ID_COLLISION`) fails the build.
-- OS variants: `…0` Linux, `…1` Windows, `…2` Kubernetes-node — same base, same drift semantics.
+- **Variant digit layout (as implemented; this replaces the original `…0` Linux / `…1` Windows / `…2` k8s sketch):**
+  - `0–4` — **Linux / Kubernetes-node** rule kinds: `0` base, `1` drift, `2` sustained-drift escalation, `3` informational, `4` exemption. Linux and k8s-node share this band because k8s nodes run the Linux agent.
+  - `5–9` — **Windows** rule kinds: `5` base, `6` drift, `7` sustained-drift escalation, `8` informational, `9` exemption. Windows gets its own band so a workload's Windows and Linux rules for the same section never collide within one slot.
 
 ### 6.2 Rule hierarchy (per workload)
 
@@ -336,7 +338,8 @@ One list per (workload, section) where exact entries exist; patterns never go in
 ```
 for each SBoB in input set:
     verify signature (cosign / spec §8) → else FAIL
-    parse & validate schema (JSON Schema for spec v0.0.4) → else FAIL
+    parse & validate schema (hand-rolled structural validator equivalent to the
+      spec v0.0.4 JSON Schema; zero-dependency, field-path errors) → else FAIL
     build IR; run linter (policy caps: ≤ 4096 regex bytes/section,
       ≤ 512 execs entries, warn on wildcard breadth > 2 levels)
     for target in {linux, windows, k8s-node}:
@@ -372,7 +375,7 @@ DNS-name drift (Windows EID 22 shown): rule tests `sbob.dns_query` against the n
 1. **`sbob-connect` saddr decoder (Linux):** parse `saddr=0x…` from connect SYSCALL records → `sbob.dst_ip`, `sbob.dst_port`, `sbob.direction`. (Shipped audit decoders do not fully cover AF_INET sockaddr unpacking for this use case.)
 2. **cgroup attribution decoder (k8s):** extract `cgroup=` from SYSCALL records → `sbob.pod_uid`; join against `sbob/k8s/podmap` in a `<list lookup="match_key_value">` context rule to stamp `sbob.pod`/`sbob.namespace`.
 3. **open-flags reconstruction (Linux):** map `openat` a1 flags bitmask → `O_*` set for `sbob.open_flags` (needed for flag-aware opens drift).
-4. **Sysmon arg normalization (Windows):** Sysmon EID 1 gives `CommandLine` (one string), not argv. The transpiler compiles `args[]` ASTs into **token-aware command-line regexes** (`argv[0]` anchored at string start, `⋯⋯` → `(?: .*)?`, quoting variants `\Q"\E|\Q'\E` tolerated) and documents the residual gap: Windows drift on args is *heuristic-equivalent*, flagged `partial` in the coverage manifest.
+4. **Sysmon arg normalization (Windows):** Sysmon EID 1 gives `CommandLine` (one string), not argv. The transpiler compiles `args[]` ASTs into **token-aware command-line regexes** (`argv[0]` anchored at string start, `⋯⋯` → `(?: .*)?`, quoting variants tolerated) and documents the residual gap: Windows drift on args is *heuristic-equivalent*, flagged `partial` in the coverage manifest.
 
 ### 7.4 Signature rules (`rulePolicies`) mapping
 
@@ -431,7 +434,7 @@ Source: `example/redis` SBoB (abridged) → Linux target.
 
 **Generated rule (`rules/sbob/100100_redis.xml`):** drift rule per §6.2; `description`: *"SBoB drift: process $(sbob.exe) not declared in execs[] of redis SBoB v0.0.4 (image redis@sha256:…)"*.
 
-**Windows counterpart:** same ID base `…1` variant; condition on Sysmon EID 1; allowlist from identical IR; args drift via §7.3.4 command-line regex.
+**Windows counterpart:** same base, Windows variant digit (§6.1); condition on Sysmon EID 1; allowlist from identical IR; args drift via §7.3.4 command-line regex.
 
 ---
 
@@ -534,3 +537,6 @@ stateDiagram-v2
 | `ERR_REGEX_BUDGET` | compiled alternation exceeds size cap |
 | `ERR_NONE_UNCONFIRMED` | explicit-empty section without `--confirm-none` |
 | `ERR_MISSING_SCOPE` | no agent group / k8s binding for workload |
+| `ERR_SECTION_CAP` | section entry count exceeds policy cap (e.g. 512 for `execs`) |
+| `ERR_SIGNATURE_UNAVAILABLE` | signature verification required but no verifier available (no cosign binary and no `--skip-signature-verify`) |
+| `ERR_YAML_PARSE` | SBoB YAML could not be parsed by the transpiler's YAML-subset parser (loud failure on unsupported constructs: tabs, block scalars, anchors/aliases) |

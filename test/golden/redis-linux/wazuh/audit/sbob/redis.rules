@@ -1,0 +1,13 @@
+# sbobctl generated audit rules — workload: redis (SBoB v0.0.4)
+# image: docker.io/library/redis@sha256:e508c66a2e1d5d5f8d16b1bbf85e6c1c19b9e5c4c5d1e3f7e5a9d7d0f8e3f4d2
+# Mode A (exe-scoped): only the workload's declared executables generate events.
+
+-a always,exit -F arch=b64 -S execve -F exe=/usr/bin/redis-server -k sbob-exec-redis
+-a always,exit -F arch=b32 -S execve -F exe=/usr/bin/redis-server -k sbob-exec-redis
+-a always,exit -F arch=b64 -S execve -F exe=/bin/sh -k sbob-exec-redis
+-a always,exit -F arch=b32 -S execve -F exe=/bin/sh -k sbob-exec-redis
+
+-a always,exit -F arch=b64 -S open,openat -F exe=/usr/bin/redis-server -k sbob-open-redis
+-a always,exit -F arch=b64 -S open,openat -F exe=/bin/sh -k sbob-open-redis
+-a always,exit -F arch=b64 -S connect -F exe=/usr/bin/redis-server -k sbob-connect-redis
+-a always,exit -F arch=b64 -S connect -F exe=/bin/sh -k sbob-connect-redis
