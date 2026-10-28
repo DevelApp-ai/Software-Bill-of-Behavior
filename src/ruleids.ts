@@ -30,6 +30,7 @@ export const SECTION_CODES = {
   ops: 8,
   endpoints: 9,
   engines: 10,
+  enforcement: 11,
 } as const;
 
 export const LINUX_VARIANTS = { base: 0, drift: 1, escalation: 2, info: 3, exemption: 4 } as const;

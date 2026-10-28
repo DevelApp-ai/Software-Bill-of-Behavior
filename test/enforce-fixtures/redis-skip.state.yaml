@@ -1,0 +1,12 @@
+# M7 test fixture — NEGATIVE: execs has a clean audit record but the global
+# default is monitor, so jumping straight to enforce skips the audit rung.
+# parseEnforceState must fail with ERR_ENFORCE_STATE_INVALID (ladder check).
+workload: redis
+state: monitor
+sections:
+  execs: enforce
+auditRecords:
+  execs:
+    started: "2026-09-20"
+    windowDays: 14
+    incidents: 0

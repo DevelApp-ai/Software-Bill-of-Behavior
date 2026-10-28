@@ -1,0 +1,13 @@
+# M7 test fixture — mixed rollout: execs enforcing, opens pulled back to
+# monitor, egress auditing (file default audit; ladder respected).
+workload: redis
+state: audit
+sections:
+  execs: enforce
+  opens: monitor
+  egress: audit
+auditRecords:
+  execs:
+    started: "2026-09-20"
+    windowDays: 14
+    incidents: 0

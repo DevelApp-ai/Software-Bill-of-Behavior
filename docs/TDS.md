@@ -1,6 +1,6 @@
 # SBoB → Wazuh Transpiler — Technical Design Specification
 
-**Version:** 1.6-draft · **Date:** 2026-10-28 · **Status:** Proposed (M1 + M2 + M3 + M4 + M5 + M6 + M8 implementation deviations folded in)
+**Version:** 1.7-draft · **Date:** 2026-10-28 · **Status:** Proposed (M1 + M2 + M3 + M4 + M5 + M6 + M8 + M7 implementation deviations folded in)
 **Author:** Detection Engineering (DevelApp)
 **Source standard:** Software Bill of Behavior (SBoB), spec v0.0.4 ([spec](https://billofbehavior.com/bob/docs/spec/), [repo](https://github.com/k8sstormcenter/bob))
 **Target platform (Phase 1):** Wazuh 4.x — Windows hosts, Linux hosts, Kubernetes nodes
@@ -279,6 +279,7 @@ rule_id = 100000
 - **Ops-health section (as implemented in M5; section code 8):** the ops section hosts two rules per workload, Linux/k8s variant band: `(8,1)` = sbob-cadence (level 9; k8s target only, chains off the shipped docker integration parent rule `87900`, fires on `docker.status=start` when the image reference is repo-matching but digest-mismatched; only digest-bearing refs are verifiable, tag-only starts are not alerted) and `(8,3)` = config-check (level 5; linux + k8s targets, fires from the command-wodle digest line when the node’s installed sbob audit key-set digest differs from the bundle — audit rules are not hot-reloadable, TDS 10.1). The digest is sha256 over the sorted unique `-k sbob…` keys of the generated audit fragment. Windows emits no ops rules (no auditd); all manifests carry `sbobVersion`/`imageID`/`bundleVersion` (`sbob-v<ver>-<digest12>`, or `-untagged` for tag-pinned images).
 - **Signature-rule layout (as implemented in M4; amends the §6.2 sketch):** `rulePolicies` (code 6) hosts four agent-side signature rules, all Linux/k8s variant band: `(6,0)` = module-load (level 12, T1547.006), `(6,1)` = namespace-change (level 10, T1611), `(6,2)` = process-tracing (level 10, T1055.008), `(6,3)` = execution-from-memory (level 10, T1620); `(6,4)` = the manager-side JSON rule for `kubernetes-api-access` (k8s target only, level 12, T1552.001). The remaining four signature behaviors are **base-section overlays** (code 0): `(0,1)` = sensitive-file-access (child of the opens drift rule), `(0,2)` = service-account-token-access (child of opens drift), `(0,3)` = kubernetes-api-access connect overlay (child of egress drift), `(0,4)` = binary-not-in-container-image (informational correlate, child of the container-lifecycle rule; cross-event correlation is not a single-event rule, so it is documented as a triage entry point). Overlays are emitted **only when the parent drift rule exists** (parent ids computed via the raw-id formula, never re-allocated — the allocator throws `ERR_ID_COLLISION` on double allocation).
 - **Endpoints and engines sections (as implemented in M6; section codes 9 and 10):** the `endpoints` section (code 9) exists only on the k8s target (Envoy access-log ingestion, §13): `(9,1)` = inbound HTTP endpoint drift (level 9, manager-side, `direction` field + `not_match_key` on the `endpoints_in` CDB list), `(9,2)` = outbound endpoint drift (level 9, `endpoints_out`) — the outbound rule uses variant digit 2 because variant 2 is the sustained-drift-escalation kind on the linux band, and endpoint drift is a distinct rule rather than an escalation; documented deviation. The `engines` section (code 10) hosts `(10,3)` = falco alert correlation (level 3; k8s target only, fires on falco-sidekick JSON `output_fields.container.name` matching the workload — the falco bundle raised the event, this rule surfaces it beside the auditd bundle in one pane). Rules are emitted only when the corresponding engine artifacts are part of the bundle; ids come from the allocator as usual (never re-allocated).
+- **Enforcement section (as implemented in M7; section code 11):** the enforcement section hosts exactly one rule per workload, Linux/k8s variant band: `(11,1)` = enforcement-telemetry (level 10, manager-side, fires on the `sbob-enforce.log` json localfile for active-response actions `process-kill` / `-revert` / `-failed` / `firewall-drop`, scoped by `sbob_workload`). Active responses themselves bind to the existing drift rules — `(1,1)` exec, `(3,1)` egress, `(4,1)` ingress — and never allocate additional ids; the enforcement artifacts live under `enforcement/sbob/<name>/` outside the rule-id band's meaning (no Wazuh rules).
 
 ### 6.2 Rule hierarchy (per workload)
 
@@ -534,6 +535,30 @@ stateDiagram-v2
 5. **Windows:** AppLocker/WDAC policy generated from `execs[]` allowlist; delivered via GPO/Intune; WDAC audit-mode mirrors the Monitor→Enforce transition.
 6. **Safety:** enforcement MUST only activate for SBoB sections whose drift has been alerting cleanly for a configured window; kill-switch = group config flag; every block event is itself a Wazuh alert (enforcement telemetry).
 
+### 14.7 As implemented in M7 (`sbobctl enforce`)
+
+The `enforce` command (CLI: `--state`, `--enforced-np`) consumes the SBoB **plus a committed rollout state file** and emits an enforcement bundle per target; it runs the same parse → verify → lint pipeline as `transpile` before touching state:
+
+```yaml
+workload: redis
+state: audit              # global default: monitor | audit | enforce
+sections:                 # per-section overrides (execs/opens/egress/ingress)
+  execs: enforce
+auditRecords:             # operator-attested clean-window evidence
+  execs: { started: "2026-10-01", windowDays: 14, incidents: 0 }
+```
+
+- **Safety gates:** a section in `enforce` requires an `auditRecords` entry with `incidents: 0` (`ERR_ENFORCE_NOT_AUDITED` otherwise), and the ladder may not skip rungs — a section may be at most one rung above the file default (`ERR_ENFORCE_STATE_INVALID`); a state file naming a different workload than the SBoB is rejected. The state file is committed next to the SBoB (GitOps review = the promotion itself).
+- **Artifacts per target:** k8s-node = OCI seccomp profile + NetworkPolicy (+ np-diff report) + AR conf/script/telemetry; linux = systemd `SystemCallFilter` drop-in + AppArmor profile + AR; windows = AppLocker policy + AR conf/doc only (no AR script). All bundles carry `<name>-enforce.manifest.json` (state summary, audit records, artifact list, `labValidation: pending`).
+- **Active responses (14.1):** `sbob-<name>-process-kill` on exec drift, `firewall-drop` on egress/ingress drift — every `<active-response>` block ships `<disabled>yes</disabled>` unless its section is in `enforce`; the kill-switch is flipping that flag back to `yes` without regenerating. The script writes JSON telemetry to `/var/ossec/logs/sbob-enforce.log`, ingested by a generated json localfile and alerted by rule `(11,1)` — every block event is itself a Wazuh alert.
+- **seccomp (14.2):** global state governs emission (monitor = not emitted); audit = `SCMP_ACT_LOG`, enforce = `SCMP_ACT_ERRNO` over the M4 signature syscall blocklist (module-load / namespace-change / process-tracing / execution-from-memory surfaces). `containerAllowed: true` on a policy removes its syscalls; `processAllowed` exemptions are NOT honored in seccomp (container-global, not per-process) — documented limitation, the Wazuh rules stay the precise plane.
+- **AppArmor (14.3):** profile attaches to the first `execs[]` path; opens flags map coarsely (`O_RDONLY`→r, `O_WRONLY`→w, `O_CREAT`→wk, `O_APPEND`→wa, letters deduplicated); `/data/*` broadens to `/data/**` (documented); args are not enforceable. The `complain` flag is present unless a covered section is enforcing; monitor sections emit commented inert rules only.
+- **NetworkPolicy (14.4):** emitted when a net section is not in monitor; annotation `sbob.k8sstormcenter.io/mode: enforce` only when **both** egress and ingress enforce, else `audit` — and audit-mode NPs MUST NOT be applied live (Calico staged policy or `--dry-run=server`; NetworkPolicy has no native audit mode). Label-selector peers (`podSelector`/`namespaceSelector`) render properly and close the §8 `k8sPeer` gap via the diff. **np-diff:** with `--enforced-np` (the live policy's peers JSON), the declared model is diffed canonically; the report (`<name>-np-diff.json`) lists `missing-rule`/`extra-rule` entries and the CLI exits 1 on any drift.
+- **AppLocker (14.5):** EXE collection from `execs[]`, path rules only (args not enforceable — the Wazuh bundle stays args-precise); deterministic uuid-v5 rule ids; `EnforcementMode` mirrors the state machine (monitor=`NotConfigured`, audit=`AuditMode` (events 8002/8003), enforce=`Enabled` (8004)). WDAC policy generation remains out of v1 scope.
+- **CI gate:** a twice-run byte-diff determinism step over all 3 enforce targets, plus a state-machine negative check (enforce without an audit record must fail).
+
+Lab validation of the enforcement pilot in Audit mode is the remaining exit criterion (§15, M7) and stays with the operator.
+
 ---
 
 ## 15. Milestones
@@ -546,7 +571,7 @@ stateDiagram-v2
 | M4 | rulePolicies signature rules + coverage manifest + CI gates | full §8 matrix machine-generated — **delivered** (manifest `coverage` key, `assertCoverageComplete` build gate, determinism + attack-harness CI steps) |
 | M5 | Deploy-repo GitOps flow + ops runbook | flow + runbook + ops-health rules **delivered** (sync script, config-check (8,3), cadence (8,1), bundleVersion); production pilot pending (docs/runbook.md §7) |
 | M6 | Phase 2 codegen (Sigma, Velociraptor, MDE, Falco) | per-engine blind-spot matrix **delivered** (`docs/engine-matrix.md` machine-checked in CI, `scripts/engine-matrix-check.ts`; Sigma/Velociraptor/MDE/Falco targets implemented, Envoy `endpoints[]` ingestion closed on k8s); lab validation pending |
-| M7 | Phase 3 enforcement behind state machine | enforcement pilot in Audit mode |
+| M7 | Phase 3 enforcement behind state machine | Monitor→Audit→Enforce state machine + seccomp/AppArmor/NetworkPolicy/AppLocker + active responses + enforcement telemetry **tooling delivered** (`sbobctl enforce`, §14.7, state-file safety gates, np-diff, CI determinism gate); enforcement pilot in Audit mode pending (lab) |
 | M8 | SBoB semantic diff gate — scored release deltas (`sbobctl diff`, §16) | fixture pair Δ = 45 mandatory + immediate review; golden JSON committed; CI determinism/verdict step |
 | M9 | Release profiler — observed vs declared behavior redraft assist (§17) | profile schema agreed; redraft proposal prototype on one workload |
 
@@ -616,15 +641,3 @@ The profiler closes the M8 gap: compare *observed* behavior (Wazuh alert history
 
 ## Appendix B — Error codes emitted by the transpiler
 
-| Code | Meaning |
-|---|---|
-| `ERR_SIGNATURE_INVALID` | SBoB signature verification failed |
-| `ERR_SCHEMA_INVALID` | SBoB does not conform to v0.0.4 schema |
-| `ERR_PCRE2_REQUIRED` | target lacks PCRE2 and SBoB contains wildcards |
-| `ERR_ID_COLLISION` | derived rule ID already allocated |
-| `ERR_REGEX_BUDGET` | compiled alternation exceeds size cap |
-| `ERR_NONE_UNCONFIRMED` | explicit-empty section without `--confirm-none` |
-| `ERR_MISSING_SCOPE` | no agent group / k8s binding for workload |
-| `ERR_SECTION_CAP` | section entry count exceeds policy cap (e.g. 512 for `execs`) |
-| `ERR_SIGNATURE_UNAVAILABLE` | signature verification required but no verifier available (no cosign binary and no `--skip-signature-verify`) |
-| `ERR_YAML_PARSE` | SBoB YAML could not be parsed by the transpiler's YAML-subset parser (loud failure on unsupported constructs: tabs, block scalars, anchors/aliases) |

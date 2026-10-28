@@ -162,3 +162,74 @@ The `--target falco` bundle is deployed in two halves:
   `wazuh/manager/sbob/<name>-envoy.md` pins the Envoy access-log format
   contract that must be configured on the sidecar before the rules are
   meaningful (lab validation pending).
+
+## 9. Phase-3 enforcement rollout (M7)
+
+Enforcement is generated, never hand-written: `node src/cli.ts enforce
+--sbob sbobs/redis.yaml --state releases/redis.state.yaml --out dist/enforce
+--target linux|windows|k8s-node` emits the enforcement bundle gated by the
+committed state file. The state machine is the safety contract:
+
+1. **State transitions.** `monitor` (detection only) → `audit` (enforcement
+   artifacts in audit form: seccomp `SCMP_ACT_LOG`, AppArmor `complain`,
+   AppLocker `AuditMode`, NP annotated `mode: audit`) → `enforce`
+   (blocking). A section may only reach `enforce` with an `auditRecords`
+   entry showing `incidents: 0` over an operator-attested window
+   (`ERR_ENFORCE_NOT_AUDITED` otherwise), and the ladder may not skip
+   rungs — a section is at most one rung above the file default
+   (`ERR_ENFORCE_STATE_INVALID`). Promote by editing the committed state
+   file; the GitOps review of that diff IS the promotion approval.
+2. **Wazuh active responses.** The AR conf (`wazuh/agent-conf/sbob/`
+   `<name>-ar.xml`) ships every `<active-response>` with
+   `<disabled>yes</disabled>` unless its section is in `enforce`.
+   **Kill-switch:** flip the block back to `<disabled>yes</disabled>` —
+   no regeneration, effective on agent restart. The process-kill script
+   (`wazuh/active-response/bin/sbob-<name>-process-kill.sh`) must be
+   deployed to each AGENT's `/var/ossec/active-response/bin/` (700, root);
+   `scripts/sync-manager.sh` stages it on the manager as the
+   distribution source. Declare the command in the manager
+   `ossec.conf` per the generated `wazuh/manager/sbob/<name>-enforce.md`.
+3. **Enforcement telemetry.** Every block event is itself an alert: the
+   script writes JSON to `/var/ossec/logs/sbob-enforce.log` on the agent,
+   the generated `json` localfile block ships it, and rule (11,1)
+   (`<id>_redis_enforce.xml`, id 100111 for redis) fires on
+   `process-kill`/`-revert`/`-failed`/`firewall-drop` actions. Watch this
+   rule during any enforcement rollout: `-failed` or `-revert` bursts mean
+   the SBoB is under-declared or the rollout is being reverted.
+4. **seccomp.** k8s: apply `enforcement/sbob/<name>/seccomp/<name>.json`
+   as an OCI profile (kubelet `seccomp` root or a CSI-managed profile),
+   reference it from the pod `securityContext`; `containerAllowed: true`
+   on a signature policy removes its syscalls, `processAllowed` is NOT
+   honored here (container-global). Hosts: install
+   `enforcement/sbob/<name>/systemd/<name>-seccomp.conf` as a unit
+   drop-in and `systemctl daemon-reload && systemctl restart <unit>`.
+   seccomp only ships when the global state is audit or enforce — flip
+   the file default back to `monitor` to withdraw it.
+5. **AppArmor (linux).** `apparmor_parser -r` the generated profile;
+   it attaches to the first declared exec path and starts in `complain`
+   unless a covered section enforces. `/data/*` entries broaden to
+   `/data/**` (documented); open flags map coarsely (r/w/k/a).
+6. **NetworkPolicy (k8s).** Both net sections enforcing → apply
+   `networkpolicy/<name>.yaml` live (annotation `mode: enforce`).
+   Anything less → the NP is annotated `mode: audit` and MUST NOT be
+   applied live: apply as a Calico staged policy or validate with
+   `kubectl apply --dry-run=server` only. Pods must carry the
+   `sbob.k8sstormcenter.io/workload: <name>` label (podSelector
+   convention). **np-diff:** feed the live policy's peers JSON via
+   `--enforced-np`; the generated `<name>-np-diff.json` lists
+   `missing-rule`/`extra-rule` drift and the CLI exits 1 on any drift —
+   run it in CI against the cluster to keep declared and enforced in
+   lockstep. dnsNames are not evaluable in NetworkPolicy (declare the
+   resolver IP:port).
+7. **AppLocker (windows).** Import
+   `enforcement/sbob/<name>/applocker/<name>.xml` via GPO or Intune
+   (EXE path rules only; args are not enforceable — the Wazuh bundle
+   stays args-precise). `EnforcementMode` mirrors the state machine:
+   NotConfigured (monitor) / AuditMode (8002/8003 events) / Enabled
+   (8004 blocks).
+8. **Enforcement pilot (exit criterion).** Run redis in global `audit`
+   with the audit-form artifacts applied, watch rules 100011/100031/
+   100041 plus telemetry 100111 for the declared window, then graduate
+   sections to `enforce` one at a time. `labValidation` in
+   `<name>-enforce.manifest.json` stays `pending` until the pilot
+   completes in the lab.
