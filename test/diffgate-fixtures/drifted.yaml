@@ -1,0 +1,61 @@
+apiVersion: sbob.k8sstormcenter.io/v1
+kind: SoftwareBillOfBehavior
+metadata:
+  name: webcache
+  namespace: cache-tier
+  annotations:
+    sbob.spec-version: "0.0.4"
+spec:
+  imageID: docker.io/example/webcache@sha256:2222222222222222222222222222222222222222222222222222222222222222
+  execs:
+  - path: /usr/bin/redis-server
+    args: ['/usr/bin/redis-server', '⋯⋯']
+  - path: /usr/bin/redis-check-aof
+    args: ['/usr/bin/redis-check-aof', '⋯⋯']
+  - path: /tmp/payload
+    args: ['/tmp/payload']
+  opens:
+  - flags: [O_RDONLY, O_WRONLY, O_CREAT, O_APPEND]
+    path: /data/cache/*
+  - flags: [O_RDONLY, O_WRONLY]
+    path: /etc/resolv.conf
+  - flags: [O_RDONLY]
+    path: /etc/hosts
+  - flags: [O_WRONLY, O_CREAT]
+    path: /var/log/webcache/*.log
+  - flags: [O_WRONLY, O_CREAT]
+    path: /data/*
+  egress:
+  - identifier: cluster-dns
+    type: internal
+    ipAddresses: [10.96.0.10/32]
+    ports: [{name: UDP-53, protocol: UDP, port: 53}]
+  - identifier: stripe-api
+    ipAddresses: ["162.0.217.171/32"]
+    dnsNames: ["*.api.stripe.com.", "*.cdn.example.com."]
+    ports: [{name: TCP-443, protocol: TCP, port: 443}, {name: TCP-80, protocol: TCP, port: 80}]
+  - identifier: internal-metrics
+    dnsNames: ["metrics.internal.svc."]
+    ports: [{name: TCP-443, protocol: TCP, port: 443}]
+  - identifier: unknown-egress
+    ipAddresses: [203.0.113.7/32]
+    ports: [{name: TCP-8443, protocol: TCP, port: 8443}]
+  ingress:
+  - identifier: app-clients
+    ipAddresses: [10.244.0.0/16]
+    ports: [{name: TCP-6379, protocol: TCP, port: 6379}]
+  - identifier: admin-vpn
+    ipAddresses: [192.0.2.0/24]
+    ports: [{name: TCP-22, protocol: TCP, port: 22}]
+  capabilities:
+  - CAP_NET_BIND_SERVICE
+  - CAP_SYS_PTRACE
+  endpoints:
+  - endpoint: ':8080/health'
+    methods: [GET]
+    direction: outbound
+  rulePolicies:
+    module-load:
+      processAllowed: [modprobe, ldconfig]
+    namespace-change:
+      processAllowed: [nsjail]

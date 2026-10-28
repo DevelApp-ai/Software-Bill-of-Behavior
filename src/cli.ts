@@ -1,13 +1,16 @@
 /**
- * sbobctl CLI — zero-dependency SBoB transpiler (transpile + validate).
+ * sbobctl CLI — zero-dependency SBoB transpiler (transpile + validate + diff).
  *
  * Usage:
  *   node src/cli.ts transpile --sbob <file.yaml> [--sbob <file2.yaml>]
  *         [--registry docs/sbob-registry.yaml] [--out dist/bundle]
  *         [--target linux|windows|k8s-node] [--skip-signature-verify] [--confirm-none execs,opens]
  *   node src/cli.ts validate --sbob <file.yaml> [--confirm-none execs,opens]
+ *   node src/cli.ts diff --old <a.yaml> --new <b.yaml>
+ *         [--report <path>] [--fail-on none|advisory|mandatory]
+ *         [--namespace <dir>] [--internal-suffix <suffix>]
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { exit } from "node:process";
 import { SbobError } from "./errors.ts";
 import { parseYaml } from "./yaml.ts";
@@ -15,6 +18,7 @@ import { validateSbob } from "./schema.ts";
 import { buildIR } from "./ir.ts";
 import { lintIR } from "./lint.ts";
 import { transpile } from "./transpile.ts";
+import { diffSbobs, formatDiffReport, type GateVerdict } from "./diffgate.ts";
 
 function usage(): never {
   console.error(`usage: sbobctl <command> [options]
@@ -22,6 +26,7 @@ function usage(): never {
 commands:
   transpile  generate a Wazuh detection bundle from one or more SBoB files
   validate   parse, schema-check and lint an SBoB without emitting artifacts
+  diff       semantic SBoB release diff with scored delta ladder (M8)
 
 options:
   --sbob <path>                 SBoB YAML file (repeatable for transpile)
@@ -30,6 +35,15 @@ options:
   --target <name>               codegen target: linux (M1), windows (M2), k8s-node (M3)
   --skip-signature-verify       skip SBoB signature verification (development profiles only)
   --confirm-none <section,...>  accept explicitly-empty (NONE) sections
+  --old <path>                  (diff) prior-release SBoB YAML
+  --new <path>                  (diff) next-release SBoB YAML
+  --report <path>               (diff) write the machine-readable JSON delta report here
+  --fail-on <level>             (diff) exit non-zero at this verdict or above:
+                                 none (always 0) | advisory | mandatory (default)
+  --namespace <dir>             (diff) package-namespace dir for exec scoring (repeatable;
+                                 default: inferred from parent dirs of prior exact execs)
+  --internal-suffix <suffix>    (diff) extra internal DNS suffix (repeatable; defaults:
+                                 svc, cluster.local, internal, local)
 `);
   exit(2);
 }
@@ -42,6 +56,12 @@ interface Args {
   target: string;
   skipSignatureVerify: boolean;
   confirmNone: string[];
+  oldSbob: string;
+  newSbob: string;
+  report: string;
+  failOn: string;
+  namespaces: string[];
+  internalSuffixes: string[];
 }
 
 function parseArgs(argv: string[]): Args {
@@ -53,6 +73,12 @@ function parseArgs(argv: string[]): Args {
     target: "linux",
     skipSignatureVerify: false,
     confirmNone: [],
+    oldSbob: "",
+    newSbob: "",
+    report: "",
+    failOn: "mandatory",
+    namespaces: [],
+    internalSuffixes: [],
   };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
@@ -68,12 +94,24 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--skip-signature-verify") args.skipSignatureVerify = true;
     else if (a === "--confirm-none") {
       args.confirmNone = next().split(",").map((s) => s.trim()).filter(Boolean);
-    } else {
+    } else if (a === "--old") args.oldSbob = next();
+    else if (a === "--new") args.newSbob = next();
+    else if (a === "--report") args.report = next();
+    else if (a === "--fail-on") {
+      args.failOn = next();
+      if (args.failOn !== "none" && args.failOn !== "advisory" && args.failOn !== "mandatory") usage();
+    } else if (a === "--namespace") args.namespaces.push(next());
+    else if (a === "--internal-suffix") args.internalSuffixes.push(next());
+    else {
       console.error(`unknown option: ${a}`);
       usage();
     }
   }
   return args;
+}
+
+function verdictRank(v: GateVerdict): number {
+  return v === "mandatory" ? 2 : v === "advisory" ? 1 : 0;
 }
 
 async function main(): Promise<void> {
@@ -112,6 +150,24 @@ async function main(): Promise<void> {
       lintIR(ir, { confirmNone: args.confirmNone, requireScope: true });
       console.log(`OK: ${doc.metadata.name} (${doc.metadata.namespace}) image ${doc.spec.imageID}`);
       for (const note of ir.coverageNotes) console.log(`  note: ${note}`);
+    } else if (args.command === "diff") {
+      if (args.oldSbob === "" || args.newSbob === "") usage();
+      const load = (path: string) => {
+        const raw = readFileSync(path, "utf8");
+        return validateSbob(parseYaml(raw));
+      };
+      const result = diffSbobs(load(args.oldSbob), load(args.newSbob), {
+        namespaces: args.namespaces,
+        internalSuffixes: args.internalSuffixes,
+      });
+      if (args.report !== "") {
+        writeFileSync(args.report, JSON.stringify(result, null, 2) + "\n");
+      }
+      console.log(formatDiffReport(result));
+      const failRank = args.failOn === "none" ? Number.POSITIVE_INFINITY : args.failOn === "advisory" ? 1 : 2;
+      if (verdictRank(result.verdict) >= failRank) {
+        exit(1);
+      }
     } else {
       usage();
     }

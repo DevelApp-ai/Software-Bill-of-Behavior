@@ -1,0 +1,135 @@
+{
+  "workload": {
+    "name": "webcache",
+    "namespace": "cache-tier"
+  },
+  "oldImageID": "docker.io/example/webcache@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "newImageID": "docker.io/example/webcache@sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "delta": [
+    {
+      "section": "capabilities",
+      "change": "added",
+      "entry": "CAP_SYS_PTRACE",
+      "weight": 5,
+      "note": "new Linux capability"
+    },
+    {
+      "section": "egress",
+      "change": "added",
+      "entry": "peer id:stripe-api: dns *.cdn.example.com.",
+      "weight": 3,
+      "note": "external DNS name"
+    },
+    {
+      "section": "egress",
+      "change": "added",
+      "entry": "peer id:internal-metrics: dns metrics.internal.svc.",
+      "weight": 2,
+      "note": "internal DNS name"
+    },
+    {
+      "section": "egress",
+      "change": "added",
+      "entry": "peer id:internal-metrics: port TCP/443",
+      "weight": 2
+    },
+    {
+      "section": "egress",
+      "change": "added",
+      "entry": "peer id:stripe-api: port TCP/80",
+      "weight": 2
+    },
+    {
+      "section": "egress",
+      "change": "added",
+      "entry": "peer id:unknown-egress: ip 203.0.113.7/32",
+      "weight": 2
+    },
+    {
+      "section": "egress",
+      "change": "added",
+      "entry": "peer id:unknown-egress: port TCP/8443",
+      "weight": 2
+    },
+    {
+      "section": "execs",
+      "change": "added",
+      "entry": "/tmp/payload",
+      "weight": 4,
+      "note": "outside the package namespace"
+    },
+    {
+      "section": "execs",
+      "change": "added",
+      "entry": "/usr/bin/redis-check-aof",
+      "weight": 1,
+      "note": "inside the package namespace"
+    },
+    {
+      "section": "execs",
+      "change": "removed",
+      "entry": "/bin/sh",
+      "weight": 1
+    },
+    {
+      "section": "ingress",
+      "change": "added",
+      "entry": "peer id:admin-vpn: ip 192.0.2.0/24",
+      "weight": 2
+    },
+    {
+      "section": "ingress",
+      "change": "added",
+      "entry": "peer id:admin-vpn: port TCP/22",
+      "weight": 2
+    },
+    {
+      "section": "opens",
+      "change": "added",
+      "entry": "/var/log/webcache/*.log",
+      "weight": 2,
+      "note": "write-flag open path"
+    },
+    {
+      "section": "opens",
+      "change": "modified",
+      "entry": "/etc/resolv.conf",
+      "weight": 2,
+      "note": "write flags added: O_WRONLY"
+    },
+    {
+      "section": "opens",
+      "change": "widened",
+      "entry": "/data/*",
+      "weight": 2,
+      "note": "widens a prior pattern"
+    },
+    {
+      "section": "opens",
+      "change": "added",
+      "entry": "/etc/hosts",
+      "weight": 1,
+      "note": "read-only open path"
+    },
+    {
+      "section": "rulePolicies",
+      "change": "added",
+      "entry": "module-load: processAllowed ldconfig",
+      "weight": 5,
+      "note": "new signature-rule exemption"
+    },
+    {
+      "section": "rulePolicies",
+      "change": "added",
+      "entry": "namespace-change: processAllowed nsjail",
+      "weight": 5,
+      "note": "new signature-rule exemption (new policy)"
+    }
+  ],
+  "score": 45,
+  "verdict": "mandatory",
+  "immediateReview": true,
+  "unweighted": [
+    "endpoints: added outbound :8080/health (unweighted in v1 — not observable from Phase 1 telemetry)"
+  ]
+}

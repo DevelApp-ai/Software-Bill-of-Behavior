@@ -15,6 +15,8 @@ Monitor **Linux**, **Windows**, and **Kubernetes** deployments from one declared
 | M5 | GitOps deployment + ops runbook | [#6](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/6) |
 | M6 | Phase 2: Sigma/Sysmon, Velociraptor, MDE, Falco codegen | [#7](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/7) |
 | M7 | Phase 3: enforcement | [#8](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/8) |
+| M8 | SBoB semantic diff gate: scored release deltas (`sbobctl diff`) | [#13](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/13) |
+| M9 | Release profiler: observed-behavior → SBoB redraft assist (outline) | [#14](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/14) |
 
 ## How it works
 
@@ -61,6 +63,9 @@ node src/cli.ts validate --sbob sbobs/redis.yaml
 
 # tests (unit + golden bundle comparison)
 node --test test/*.test.ts
+
+# semantic release diff — scored behavior-delta ladder (M8; exits 1 on advisory/mandatory verdicts)
+node src/cli.ts diff --old releases/webcache-1.2.yaml --new releases/webcache-1.3.yaml --report dist/diff-report.json
 ```
 
 Workload rule IDs are derived deterministically from the slot registry (`docs/sbob-registry.yaml`):
