@@ -1,0 +1,32 @@
+apiVersion: sbob.k8sstormcenter.io/v1
+kind: SoftwareBillOfBehavior
+metadata:
+  name: redis
+  namespace: cache-tier
+  annotations:
+    sbob.spec-version: "0.0.4"
+spec:
+  imageID: docker.io/library/redis@sha256:e508c66a2e1d5d5f8d16b1bbf85e6c1c19b9e5c4c5d1e3f7e5a9d7d0f8e3f4d2
+  execs:
+  - path: /usr/bin/redis-server
+    args: ['/usr/bin/redis-server', '⋯⋯']
+  - path: /bin/sh
+    args: [/bin/sh, '⋯']
+  opens:
+  - flags: [O_RDONLY, O_WRONLY, O_CREAT, O_APPEND]
+    path: /data/*
+  - flags: [O_RDONLY]
+    path: /etc/resolv.conf
+  egress:
+  - identifier: cluster-dns
+    type: internal
+    ipAddresses: [10.96.0.10/32]
+    ports: [{name: UDP-53, protocol: UDP, port: 53}]
+  - identifier: stripe-api
+    ipAddresses: ["162.0.217.171/32"]
+    dnsNames: ["*.api.stripe.com."]
+    ports: [{name: TCP-443, protocol: TCP, port: 443}]
+  ingress:
+  - identifier: app-clients
+    ipAddresses: [10.244.0.0/16]
+    ports: [{name: TCP-6379, protocol: TCP, port: 6379}]

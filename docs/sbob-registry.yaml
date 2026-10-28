@@ -1,0 +1,3 @@
+# sbobctl workload slot registry (TDS 6.1). Slots are allocated once and never reused.
+workloads:
+  redis: {slot: 0}
