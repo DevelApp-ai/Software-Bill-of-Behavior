@@ -156,7 +156,8 @@ function validateNetEntry(e: YamlValue, path: string): NetEntryLike {
   const portsRaw = asArray(m["ports"]);
   const ports = portsRaw.map((p, j) => {
     const pm = asMap(p);
-    const protocol = optString(pm["protocol"], `${path}.ports[${j}].protocol`);
+    // narrowed by the fail() guard below to the three literal protocols
+    const protocol = optString(pm["protocol"], `${path}.ports[${j}].protocol`) as "TCP" | "UDP" | "SCTP" | undefined;
     if (protocol !== undefined && protocol !== "TCP" && protocol !== "UDP" && protocol !== "SCTP") {
       fail(`${path}.ports[${j}].protocol`, `expected TCP, UDP or SCTP, got "${protocol}"`);
     }
