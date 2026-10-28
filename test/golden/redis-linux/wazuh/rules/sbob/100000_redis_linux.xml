@@ -7,7 +7,7 @@
 
   <rule id="100000" level="0">
     <if_group>auditd</if_group>
-    <field name="sbob.key">^sbob-exec(?:-redis)?$</field>
+    <field name="sbob.key" type="pcre2">^sbob-exec(?:-redis)?$</field>
     <group>sbob,redis,sbob-exec</group>
     <description>SBoB base: exec event on sbob scope (redis)</description>
   </rule>
@@ -39,7 +39,7 @@
   <!-- matches type=PATH records; workload scoping via Mode A exe-filtered audit rules -->
   <rule id="100020" level="0">
     <if_group>auditd</if_group>
-    <field name="sbob.path">^/.+$</field>
+    <field name="sbob.path" type="pcre2">^/.+$</field>
     <group>sbob,redis,sbob-open</group>
     <description>SBoB base: PATH record observed (opens scope redis)</description>
   </rule>
@@ -47,7 +47,7 @@
   <!-- path-level drift; flag-level (O_*) child rules are deferred per TDS 6.4 -->
   <rule id="100021" level="9">
     <if_sid>100020</if_sid>
-    <field name="sbob.path">^(?!(?:/data/[^/]+(?:/[^/]+)*)$)</field>
+    <field name="sbob.path" type="pcre2">^(?!(?:/data/[^/]+(?:/[^/]+)*)$)</field>
     <list field="sbob.path" lookup="not_match_key">sbob/redis/opens</list>
     <group>sbob,redis,sbob-drift,file-access</group>
     <mitre><id>T1005</id></mitre>
@@ -65,7 +65,7 @@
 
   <rule id="100030" level="0">
     <if_group>auditd</if_group>
-    <field name="sbob.key">^sbob-connect(?:-redis)?$</field>
+    <field name="sbob.key" type="pcre2">^sbob-connect(?:-redis)?$</field>
     <group>sbob,redis,sbob-connect</group>
     <description>SBoB base: outbound connect observed (redis)</description>
   </rule>
@@ -73,7 +73,7 @@
   <!-- fires when the saddr decoder (TDS 7.3.1) emits sbob.dst_ip/sbob.dst_port;  -->
   <rule id="100031" level="9">
     <if_sid>100030</if_sid>
-    <field name="sbob.dst_port">^(?!(?:53|443)$)</field>
+    <field name="sbob.dst_port" type="pcre2">^(?!(?:53|443)$)</field>
     <list field="sbob.dst_ip" lookup="not_address_match_key">sbob/redis/egress_addrs</list>
     <group>sbob,redis,sbob-drift,egress-traffic</group>
     <mitre><id>T1071</id></mitre>
@@ -91,7 +91,7 @@
 
   <rule id="100043" level="3">
     <if_group>auditd</if_group>
-    <field name="sbob.key">^sbob-accept(?:-redis)?$</field>
+    <field name="sbob.key" type="pcre2">^sbob-accept(?:-redis)?$</field>
     <group>sbob,redis,sbob-info,ingress-traffic</group>
     <description>SBoB informational: ingress[] declared for redis but Linux accept() telemetry cannot attribute peers; host-firewall ingestion required (TDS 8)</description>
   </rule>

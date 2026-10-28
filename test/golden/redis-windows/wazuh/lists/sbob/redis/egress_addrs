@@ -1,0 +1,3 @@
+# egress CDB address list: key=ip/mask (canonicalized), value=identifier; shared with the linux bundle (TDS 6.4)
+10.96.0.10/32:cluster-dns
+162.0.217.171/32:stripe-api
