@@ -130,26 +130,41 @@ jobs:
           #    scripts/sync-manager.sh (rules/decoders flattened, CDB lists path-preserved)
           # (invoked via sh: the checked-out file may not carry the exec bit)
           sh scripts/sync-manager.sh dist/bundle --root staging
-          find staging/rules staging/decoders staging/lists -type f | sort
+          # not every bundle emits every part (e.g. windows has no CDB lists) —
+          # optional dirs must not fail the install
+          find staging -type f | sort
 
           # 2. copy into the container's /var/ossec/etc/{rules,decoders,lists}
-          docker cp staging/rules/.    "$WAZUH_CONTAINER:/var/ossec/etc/rules/"
-          docker cp staging/decoders/. "$WAZUH_CONTAINER:/var/ossec/etc/decoders/"
-          docker cp staging/lists/.    "$WAZUH_CONTAINER:/var/ossec/etc/lists/"
+          if [ -d staging/rules ]; then
+            docker cp staging/rules/. "$WAZUH_CONTAINER:/var/ossec/etc/rules/"
+          fi
+          if [ -d staging/decoders ]; then
+            docker cp staging/decoders/. "$WAZUH_CONTAINER:/var/ossec/etc/decoders/"
+          fi
+          if [ -d staging/lists ]; then
+            docker cp staging/lists/. "$WAZUH_CONTAINER:/var/ossec/etc/lists/"
+          fi
 
           # 3. CDB lists are NOT auto-loaded by Wazuh: every generated sbob list
           #    must be declared in the ossec.conf <ruleset> block
           docker cp "$WAZUH_CONTAINER:/var/ossec/etc/ossec.conf" ossec.conf
-          (cd staging/lists && find sbob -type f | sort) | while read -r rel; do
-            printf '    <list>etc/lists/%s</list>\n' "$rel"
-          done > sbob-lists.snippet
-          awk '
-            BEGIN { while ((getline l < "sbob-lists.snippet") > 0) ins = ins l ORS }
-            !done && /<\/ruleset>/ { printf "%s", ins; done = 1 }
-            { print }
-          ' ossec.conf > ossec.conf.new
-          mv ossec.conf.new ossec.conf
-          echo "declared lists:" && grep "<list>etc/lists/sbob" ossec.conf
+          : > sbob-lists.snippet
+          if [ -d staging/lists/sbob ]; then
+            (cd staging/lists && find sbob -type f | sort) | while read -r rel; do
+              printf '    <list>etc/lists/%s</list>\n' "$rel"
+            done >> sbob-lists.snippet
+          fi
+          if [ -s sbob-lists.snippet ]; then
+            awk '
+              BEGIN { while ((getline l < "sbob-lists.snippet") > 0) ins = ins l ORS }
+              !done && /<\/ruleset>/ { printf "%s", ins; done = 1 }
+              { print }
+            ' ossec.conf > ossec.conf.new
+            mv ossec.conf.new ossec.conf
+            echo "declared lists:" && grep "<list>etc/lists/sbob" ossec.conf
+          else
+            echo "no CDB lists in this bundle — ossec.conf left untouched"
+          fi
           docker cp ossec.conf "$WAZUH_CONTAINER:/var/ossec/etc/ossec.conf"
 
       - name: Restart the manager and wait for the API (bundle must load cleanly)
