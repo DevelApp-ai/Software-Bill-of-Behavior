@@ -17,7 +17,8 @@ export type SbobErrorCode =
   | "ERR_ENFORCE_NOT_AUDITED"
   | "ERR_PROFILE_EVENT"
   | "ERR_PROFILE_SCOPE"
-  | "ERR_PROFILE_DISPOSITION";
+  | "ERR_PROFILE_DISPOSITION"
+  | "ERR_LAB_VALIDATION";
 
 export class SbobError extends Error {
   readonly code: SbobErrorCode;
