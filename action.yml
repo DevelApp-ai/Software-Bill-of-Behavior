@@ -1,0 +1,152 @@
+name: 'sbob-diff-gate'
+description: 'Semantic SBoB release diff gate — scored behavior-delta ladder with a promotion verdict. Wraps `sbobctl diff` (zero-dependency, Node 22 type stripping); the exit code is propagated from --fail-on.'
+author: 'DevelApp-ai'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  old:
+    description: 'Prior-release SBoB YAML (path relative to the workspace)'
+    required: true
+  new:
+    description: 'Next-release SBoB YAML (path relative to the workspace)'
+    required: true
+  fail-on:
+    description: 'Exit non-zero at this verdict or above: none | advisory | mandatory'
+    required: false
+    default: 'mandatory'
+  namespace:
+    description: 'Package-namespace dir for exec scoring (comma- or newline-separated for multiple; default: inferred from parent dirs of prior exact execs)'
+    required: false
+    default: ''
+  internal-suffix:
+    description: 'Extra internal DNS suffix (comma- or newline-separated for multiple; defaults: svc, cluster.local, internal, local)'
+    required: false
+    default: ''
+  report-name:
+    description: 'Base name for the delta report (writes <name>.json + <name>.delta.md and uploads them as the workflow artifact of that name; keep it artifact-name-safe)'
+    required: false
+    default: 'sbob-diff-gate'
+  github-token:
+    description: 'Token used to attach the delta report as a comment on the triggering PR (empty = artifact only; requires pull-requests: write)'
+    required: false
+    default: ''
+
+outputs:
+  verdict:
+    description: 'Gate verdict: clean | advisory | mandatory (error when the diff itself could not run)'
+    value: ${{ steps.sbob-diff.outputs.verdict }}
+  score:
+    description: 'Behavior-delta score (Δ)'
+    value: ${{ steps.sbob-diff.outputs.score }}
+  exit-code:
+    description: 'sbobctl diff exit code, propagated from --fail-on'
+    value: ${{ steps.sbob-diff.outputs.exit-code }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: 'Set up Node 22 (zero-dependency CLI; native TypeScript type stripping, no npm install)'
+      uses: actions/setup-node@v5
+      with:
+        node-version: 22
+
+    - name: 'Run sbobctl diff'
+      id: sbob-diff
+      shell: bash
+      env:
+        SBOB_CLI: ${{ github.action_path }}/src/cli.ts
+        SBOB_OLD: ${{ inputs.old }}
+        SBOB_NEW: ${{ inputs.new }}
+        SBOB_FAIL_ON: ${{ inputs.fail-on }}
+        SBOB_NAMESPACE: ${{ inputs.namespace }}
+        SBOB_INTERNAL_SUFFIX: ${{ inputs.internal-suffix }}
+        SBOB_REPORT_NAME: ${{ inputs.report-name }}
+        SBOB_OUT: ${{ runner.temp }}/sbob-diff-gate
+      run: |
+        set -euo pipefail
+        mkdir -p "$SBOB_OUT"
+        rm -f "$SBOB_OUT"/*.json "$SBOB_OUT"/*.delta.md "$SBOB_OUT"/cli-stderr.txt
+        report="$SBOB_OUT/$SBOB_REPORT_NAME.json"
+        md="$SBOB_OUT/$SBOB_REPORT_NAME.delta.md"
+
+        args=(--old "$SBOB_OLD" --new "$SBOB_NEW" --fail-on "$SBOB_FAIL_ON")
+        # multi-value inputs: comma- or newline-separated (issue #22 wording)
+        while IFS= read -r ns; do
+          [ -n "$ns" ] && args+=(--namespace "$ns")
+        done < <(printf '%s' "$SBOB_NAMESPACE" | tr ',' '\n')
+        while IFS= read -r sfx; do
+          [ -n "$sfx" ] && args+=(--internal-suffix "$sfx")
+        done < <(printf '%s' "$SBOB_INTERNAL_SUFFIX" | tr ',' '\n')
+
+        set +e
+        node "$SBOB_CLI" diff "${args[@]}" --report "$report" > "$md" 2> "$SBOB_OUT/cli-stderr.txt"
+        rc=$?
+        set -e
+
+        if [ -f "$report" ]; then
+          readarray -t parsed < <(node -e '
+            const r = require(process.argv[1]);
+            process.stdout.write(r.verdict + "\n" + r.score + "\n");
+          ' "$report")
+          verdict="${parsed[0]}"
+          score="${parsed[1]}"
+        else
+          # The diff itself failed (invalid SBoB, workload mismatch, ...) —
+          # surface the CLI error and fail the gate: never green on a broken diff.
+          verdict="error"
+          score="0"
+          rc=1
+          {
+            echo "# SBoB diff gate — ERROR (sbobctl diff exited $rc)"
+            echo
+            cat "$SBOB_OUT/cli-stderr.txt"
+          } > "$md"
+        fi
+
+        {
+          echo "verdict=$verdict"
+          echo "score=$score"
+          echo "exit-code=$rc"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "### SBoB diff gate — verdict: **${verdict^^}** (Δ = $score, fail-on: $SBOB_FAIL_ON)"
+          echo
+          cat "$md"
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit 0
+
+    - name: 'Upload the delta report artifact (JSON + markdown)'
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.report-name }}
+        path: |
+          ${{ runner.temp }}/sbob-diff-gate/*.json
+          ${{ runner.temp }}/sbob-diff-gate/*.delta.md
+        if-no-files-found: error
+
+    - name: 'Attach the delta report to the triggering PR'
+      if: ${{ always() && inputs.github-token != '' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        SBOB_OUT: ${{ runner.temp }}/sbob-diff-gate
+        SBOB_REPORT_NAME: ${{ inputs.report-name }}
+      run: |
+        command -v gh >/dev/null 2>&1 || { echo "gh CLI not available on this runner; the artifact carries the delta report"; exit 0; }
+        gh pr comment "$PR_NUMBER" --body-file "$SBOB_OUT/$SBOB_REPORT_NAME.delta.md"
+
+    - name: 'Apply the diff-gate verdict (propagate the sbobctl exit code)'
+      if: ${{ always() }}
+      shell: bash
+      env:
+        SBOB_VERDICT: ${{ steps.sbob-diff.outputs.verdict }}
+        SBOB_EXIT: ${{ steps.sbob-diff.outputs.exit-code }}
+      run: |
+        echo "sbobctl diff verdict: $SBOB_VERDICT (exit $SBOB_EXIT)"
+        exit "$SBOB_EXIT"
