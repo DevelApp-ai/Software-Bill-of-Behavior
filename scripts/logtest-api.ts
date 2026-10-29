@@ -43,7 +43,7 @@
 // ---------------------------------------------------------------------------
 import { readFileSync } from "node:fs";
 import { request as httpsRequest } from "node:https";
-import { request as httpRequest } from "node:http";
+import { request as httpRequest, type IncomingMessage } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -198,10 +198,10 @@ interface HttpReply {
 function requestRaw(url: string, method: string, headers: Record<string, string>, body: string | null, verifyTls: boolean): Promise<HttpReply> {
   return new Promise<HttpReply>((resolve, reject) => {
     const u = new URL(url);
-    const collect = (res: { statusCode?: number; setEncoding: (e: string) => void; on: (ev: string, cb: (c: string) => void) => void }): void => {
+    const collect = (res: IncomingMessage): void => {
       let data = "";
       res.setEncoding("utf8");
-      res.on("data", (chunk: string) => {
+      res.on("data", (chunk) => {
         data += chunk;
       });
       res.on("end", () => resolve({ status: res.statusCode ?? 0, body: data }));
