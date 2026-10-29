@@ -128,7 +128,7 @@ Behavior — deterministic and zero-dependency (Node 22 type stripping, no `npm 
 
 Outputs: `verdict` (`clean|advisory|mandatory|error`), `score` (Δ), `exit-code`.
 
-This repo consumes its own action on the committed fixture pair in [`.github/workflows/diff-gate-demo.yml`](.github/workflows/diff-gate-demo.yml): the **fixture-verify** job asserts the contract on every PR (clean pair passes; drifted pair fails MANDATORY with exit 1, asserted via `continue-on-error` so ordinary PRs stay green), and a `demo/promotion-*` branch gets the real red **promotion-gate** check with both reports attached — the #22 exit-criteria demo promotion PR.
+This repo consumes its own action on the committed fixture pair in [`.github/workflows/diff-gate-demo.yml`](.github/workflows/diff-gate-demo.yml): the **fixture-verify** job asserts the contract on every PR — the clean pair passes; the drifted pair fails **MANDATORY (Δ = 45)** with exit 1, asserted via `continue-on-error` so ordinary PRs stay green — and any `demo/promotion-*` branch gets the real red **promotion-gate** check with both reports attached. The demonstrated promotion evidence is recorded in [docs/diff-gate-demo.md](docs/diff-gate-demo.md) (verdict table, run, artifact mechanics) instead of an open demo PR; the live lane stays available on demand.
 
 ## The derivation loop (M9)
 
