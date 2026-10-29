@@ -97,6 +97,15 @@ test("sigma opens_windows: EID 11 file-create partial semantics", () => {
   assert.match(yml, /TargetFilename:/);
 });
 
+test("sigma titles are quoted scalars — unquoted \": \" breaks strict YAML (pySigma/SigmaHQ)", () => {
+  const files = generateSigmaBundle(redisIR()).filter((f) => f.path.endsWith(".yml"));
+  assert.equal(files.length, 7);
+  for (const f of files) {
+    const title = /^title: (.+)$/m.exec(f.content)![1]!;
+    assert.ok(title.startsWith('"') && title.endsWith('"'), `title of ${f.path} must be a double-quoted scalar`);
+  }
+});
+
 // --- Velociraptor ------------------------------------------------------------
 
 test("velociraptor artifact: pslist/netstat sweeps with RE2-safe anchored PCRE", () => {

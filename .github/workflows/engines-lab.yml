@@ -12,8 +12,12 @@ permissions:
   pull-requests: write   # failure diagnostics are posted as PR comments
 
 env:
-  # pinned toolchain per engine — bump deliberately, like the wazuh manager image
+  # pinned toolchain per engine — bump deliberately, like the wazuh manager image.
+  # The logpoint lane rides an older sigma-cli: LogPoint's pySigma backend pins
+  # pysigma <2.0, while sigma-cli 4.x requires pysigma >=2.0 — until LogPoint
+  # ships a pysigma 2.x build the conversion lane stays on sigma-cli 3.x.
   SIGMA_CLI_VERSION: "4.0.0"
+  LOGPOINT_SIGMA_CLI_VERSION: "3.1.0"
   PYSIGMA_LOGPOINT_VERSION: "1.0.2"
   FALCO_IMAGE: falcosecurity/falco:0.37.1
   VELOCIRAPTOR_VERSION: "0.77.3"
@@ -96,8 +100,8 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          python -m pip install --disable-pip-version-check "sigma-cli==$SIGMA_CLI_VERSION" "pysigma-backend-logpoint==$PYSIGMA_LOGPOINT_VERSION" 2>&1 | tee /tmp/lane.log
-          sigma version 2>&1 | tee -a /tmp/lane.log
+          python -m pip install --disable-pip-version-check "sigma-cli==$LOGPOINT_SIGMA_CLI_VERSION" "pysigma-backend-logpoint==$PYSIGMA_LOGPOINT_VERSION" 2>&1 | tee /tmp/lane.log
+          python -m pip list 2>/dev/null | grep -iE "sigma|pysigma" | tee -a /tmp/lane.log
           # LogPoint's own auditd taxonomy: type→event_type, exe/name→path
           sigma convert -t logpoint -p logpoint_linux dist/bundle-sigma/sigma/sbob/*_linux.yml \
             | tee /tmp/convert-linux.lql | tee -a /tmp/lane.log
@@ -157,8 +161,15 @@ jobs:
         run: |
           set -o pipefail
           docker pull "$FALCO_IMAGE" 2>&1 | tee /tmp/lane.log
+          # --validate loads only the named files: pass the image's standard
+          # ruleset first so its macros (spawned_process et al.) are defined
+          # when our custom rules load — the deployment context our bundle ships in
           docker run --rm -v "$PWD/dist/bundle-falco:/rules:ro" --entrypoint /usr/bin/falco \
-            "$FALCO_IMAGE" --validate /rules/falco/sbob/redis_rules.yaml 2>&1 | tee -a /tmp/lane.log
+            "$FALCO_IMAGE" \
+            --validate /etc/falco/falco_rules.yaml \
+            --validate /rules/falco/sbob/redis_rules.yaml 2>&1 | tee -a /tmp/lane.log
+          grep -q "falco_rules.yaml: Ok" /tmp/lane.log
+          grep -q "redis_rules.yaml: Ok" /tmp/lane.log
           echo "falco --validate OK" | tee -a /tmp/lane.log
       - name: Post lane diagnostics to the PR (failure path)
         if: failure()
