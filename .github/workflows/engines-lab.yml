@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write   # failure diagnostics are posted as PR comments
 
 env:
   # pinned toolchain per engine — bump deliberately, like the wazuh manager image
@@ -39,14 +40,38 @@ jobs:
           node src/cli.ts transpile --sbob sbobs/redis.yaml --out dist/bundle-sigma \
             --target sigma --registry docs/sbob-registry.yaml --skip-signature-verify
       - name: sigma-cli check (every generated rule must be a valid Sigma rule)
+        shell: bash
         run: |
-          python -m pip install --quiet "sigma-cli==$SIGMA_CLI_VERSION"
-          sigma --version
+          set -o pipefail
+          python -m pip install --disable-pip-version-check "sigma-cli==$SIGMA_CLI_VERSION" 2>&1 | tee /tmp/lane.log
+          sigma version 2>&1 | tee -a /tmp/lane.log
           for f in dist/bundle-sigma/sigma/sbob/*.yml; do
-            echo "checking $f"
-            sigma check "$f"
+            echo "checking $f" | tee -a /tmp/lane.log
+            sigma check "$f" 2>&1 | tee -a /tmp/lane.log
           done
-          echo "sigma check OK: $(ls dist/bundle-sigma/sigma/sbob/*.yml | wc -l) rules"
+          echo "sigma check OK: $(ls dist/bundle-sigma/sigma/sbob/*.yml | wc -l) rules" | tee -a /tmp/lane.log
+      - name: Post lane diagnostics to the PR (failure path)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "## engines-lab diagnostics — sigma"
+            echo '```'
+            tail -c 6000 /tmp/lane.log 2>/dev/null || true
+            echo '```'
+          } > diag.md
+          cat diag.md
+          if [ -n "${PR_NUMBER:-}" ]; then
+            jq -n --rawfile body diag.md '{body: $body}' > payload.json
+            pcode=$(curl -sS -o post-resp.json -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -d @payload.json || true)
+            echo "diag comment POST -> HTTP ${pcode:-none}"
+          fi
 
   logpoint:
     name: logpoint (sigma convert through LogPoint's official pipelines)
@@ -68,21 +93,48 @@ jobs:
           node src/cli.ts transpile --sbob sbobs/redis.yaml --out dist/bundle-sigma \
             --target sigma --registry docs/sbob-registry.yaml --skip-signature-verify
       - name: Convert the auditd-plane rules through logpoint_linux
+        shell: bash
         run: |
-          python -m pip install --quiet "sigma-cli==$SIGMA_CLI_VERSION" "pysigma-backend-logpoint==$PYSIGMA_LOGPOINT_VERSION"
-          out="$(sigma convert -t logpoint -p logpoint_linux dist/bundle-sigma/sigma/sbob/*_linux.yml)"
-          echo "$out"
-          test -n "$out"
+          set -o pipefail
+          python -m pip install --disable-pip-version-check "sigma-cli==$SIGMA_CLI_VERSION" "pysigma-backend-logpoint==$PYSIGMA_LOGPOINT_VERSION" 2>&1 | tee /tmp/lane.log
+          sigma version 2>&1 | tee -a /tmp/lane.log
           # LogPoint's own auditd taxonomy: type→event_type, exe/name→path
-          echo "$out" | grep -q 'SYSCALL'
-          echo "$out" | grep -q 'path'
-          echo "logpoint linux conversion OK"
+          sigma convert -t logpoint -p logpoint_linux dist/bundle-sigma/sigma/sbob/*_linux.yml \
+            | tee /tmp/convert-linux.lql | tee -a /tmp/lane.log
+          test -s /tmp/convert-linux.lql
+          grep -q SYSCALL /tmp/convert-linux.lql
+          grep -q path /tmp/convert-linux.lql
+          echo "logpoint linux conversion OK" | tee -a /tmp/lane.log
       - name: Convert the Sysmon-plane rules through logpoint_windows
+        shell: bash
         run: |
-          out="$(sigma convert -t logpoint -p logpoint_windows dist/bundle-sigma/sigma/sbob/*_windows.yml)"
-          echo "$out"
-          test -n "$out"
-          echo "logpoint windows conversion OK"
+          set -o pipefail
+          sigma convert -t logpoint -p logpoint_windows dist/bundle-sigma/sigma/sbob/*_windows.yml \
+            | tee /tmp/convert-windows.lql | tee -a /tmp/lane.log
+          test -s /tmp/convert-windows.lql
+          echo "logpoint windows conversion OK" | tee -a /tmp/lane.log
+      - name: Post lane diagnostics to the PR (failure path)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "## engines-lab diagnostics — logpoint"
+            echo '```'
+            tail -c 6000 /tmp/lane.log 2>/dev/null || true
+            echo '```'
+          } > diag.md
+          cat diag.md
+          if [ -n "${PR_NUMBER:-}" ]; then
+            jq -n --rawfile body diag.md '{body: $body}' > payload.json
+            pcode=$(curl -sS -o post-resp.json -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -d @payload.json || true)
+            echo "diag comment POST -> HTTP ${pcode:-none}"
+          fi
 
   falco:
     name: falco (falco --validate on the generated rules)
@@ -101,11 +153,35 @@ jobs:
           node src/cli.ts transpile --sbob sbobs/redis.yaml --out dist/bundle-falco \
             --target falco --registry docs/sbob-registry.yaml --skip-signature-verify
       - name: Validate the generated rules against the pinned Falco engine
+        shell: bash
         run: |
-          docker pull "$FALCO_IMAGE"
+          set -o pipefail
+          docker pull "$FALCO_IMAGE" 2>&1 | tee /tmp/lane.log
           docker run --rm -v "$PWD/dist/bundle-falco:/rules:ro" --entrypoint /usr/bin/falco \
-            "$FALCO_IMAGE" --validate /rules/falco/sbob/redis_rules.yaml
-          echo "falco --validate OK"
+            "$FALCO_IMAGE" --validate /rules/falco/sbob/redis_rules.yaml 2>&1 | tee -a /tmp/lane.log
+          echo "falco --validate OK" | tee -a /tmp/lane.log
+      - name: Post lane diagnostics to the PR (failure path)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "## engines-lab diagnostics — falco"
+            echo '```'
+            tail -c 6000 /tmp/lane.log 2>/dev/null || true
+            echo '```'
+          } > diag.md
+          cat diag.md
+          if [ -n "${PR_NUMBER:-}" ]; then
+            jq -n --rawfile body diag.md '{body: $body}' > payload.json
+            pcode=$(curl -sS -o post-resp.json -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -d @payload.json || true)
+            echo "diag comment POST -> HTTP ${pcode:-none}"
+          fi
 
   velociraptor:
     name: velociraptor (VQL sweep queries executed on the runner)
@@ -125,16 +201,40 @@ jobs:
             --target velociraptor --registry docs/sbob-registry.yaml --skip-signature-verify
           node scripts/extract-vql.ts dist/bundle-velo/velociraptor/sbob/redis.yaml /tmp/vql
       - name: Run every sweep query with the pinned Velociraptor binary
+        shell: bash
         run: |
+          set -o pipefail
           curl -fsSL -o velociraptor.gz \
-            "https://github.com/Velocidex/velociraptor/releases/download/v${VELOCIRAPTOR_VERSION}/velociraptor-v${VELOCIRAPTOR_VERSION}-linux-amd64-musl.gz"
-          gunzip velociraptor.gz
-          chmod +x velociraptor
-          ./velociraptor --version
+            "https://github.com/Velocidex/velociraptor/releases/download/v${VELOCIRAPTOR_VERSION}/velociraptor-v${VELOCIRAPTOR_VERSION}-linux-amd64-musl.gz" \
+            2>&1 | tee /tmp/lane.log
+          gunzip velociraptor.gz && chmod +x velociraptor
+          ./velociraptor version 2>&1 | tee -a /tmp/lane.log
           queries="$(ls /tmp/vql/*.vql)"
           test "$(echo "$queries" | wc -l)" -ge 2
           for q in $queries; do
-            echo "--- running $q"
-            ./velociraptor query -f "$q" --format json
+            echo "--- running $q" | tee -a /tmp/lane.log
+            ./velociraptor query -f "$q" --format json 2>&1 | tee -a /tmp/lane.log
           done
-          echo "velociraptor query OK: generated VQL parses and executes against live runner state"
+          echo "velociraptor query OK: generated VQL parses and executes against live runner state" | tee -a /tmp/lane.log
+      - name: Post lane diagnostics to the PR (failure path)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "## engines-lab diagnostics — velociraptor"
+            echo '```'
+            tail -c 6000 /tmp/lane.log 2>/dev/null || true
+            echo '```'
+          } > diag.md
+          cat diag.md
+          if [ -n "${PR_NUMBER:-}" ]; then
+            jq -n --rawfile body diag.md '{body: $body}' > payload.json
+            pcode=$(curl -sS -o post-resp.json -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -d @payload.json || true)
+            echo "diag comment POST -> HTTP ${pcode:-none}"
+          fi
