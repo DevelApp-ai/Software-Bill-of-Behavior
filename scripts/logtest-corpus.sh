@@ -27,8 +27,19 @@
 #                                   plus the underscore spelling) and rerun to
 #                                   watch 100071 fall silent (tier-1 resolved)
 #
+#   php     (PHP2Shell scenario, issue #23 / docs/php2shell-scenario.md):
+#                 benign corpus  -> ZERO drift alerts
+#                 drift corpus   -> 100111 (exec: /bin/sh from a hijacked
+#                                   php-fpm worker, CVE-2026-109618),
+#                                   100121 (open: webshell drop to /var/tmp),
+#                                   100131 (connect: reverse shell/C2,
+#                                   CVE-2026-109619),
+#                                   100163 (memfd signature: fileless variant)
+#                 The php case proves the SBoB point: entry vector unknown,
+#                 post-exploit BEHAVIOR is still drift.
+#
 # Usage (on the lab Wazuh manager, or anywhere with wazuh-logtest):
-#   ./scripts/logtest-corpus.sh [linux|windows|k8s]     # default: linux
+#   ./scripts/logtest-corpus.sh [linux|windows|k8s|php]     # default: linux
 #
 # Requires: the bundle from `node src/cli.ts transpile --sbob sbobs/redis.yaml
 # --out <dir> --target <linux|windows|k8s-node>` to be installed as a test
@@ -40,6 +51,11 @@
 # (0560-docker_integration_rules.xml, parent rule 87900) for rule 100074.
 # wazuh-logtest reads the manager's live ruleset; it does not take a rules
 # path argument.
+#
+# For detection testing in the Wazuh sense (JSON-asserted rule ids, session
+# firedtimes continuity, and a sustained gate that proves the frequency
+# children 8/120s by replaying the drift corpus 8x in one logtest session),
+# use the API-driven variant: scripts/logtest-api.ts --target <target>.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -63,8 +79,15 @@ case "$TARGET" in
     DRIFT_IDS=(100011 100021 100031 100060 100062)
     ATTR_IDS=(100070 100071 100073 100074)
     ;;
+  php)
+    # PHP2Shell scenario (CVE-2026-109618 / CVE-2026-109619) — transpile
+    # sbobs/php-fpm.yaml (slot 1) and install it beside the redis bundle.
+    BENIGN="$CORPUS_DIR/php-benign.audit"
+    DRIFT="$CORPUS_DIR/php-drift.audit"
+    DRIFT_IDS=(100111 100121 100131 100163)
+    ;;
   *)
-    echo "ERROR: unknown target \"$TARGET\" (expected linux, windows or k8s)" >&2
+    echo "ERROR: unknown target \"$TARGET\" (expected linux, windows, k8s or php)" >&2
     exit 2
     ;;
 esac
@@ -82,6 +105,9 @@ for id in "${DRIFT_IDS[@]}"; do
     case "$TARGET" in
       linux)
         echo "      check decoder chain (sbob.key/exe/path/saddr fields) and CDB list loading" >&2 ;;
+      php)
+        echo "      check decoder chain (sbob.key/exe/path/saddr fields) and CDB list loading" >&2
+        echo "      (php-fpm bundle: slot 1 — rules 1001xx; see docs/php2shell-scenario.md)" >&2 ;;
       windows)
         echo "      check the shipped sysmon parent rule 61600 is loaded and the" >&2
         echo "      eventchannel decoder emits win.system.eventID / win.eventdata.*" >&2 ;;
@@ -106,6 +132,9 @@ for id in "${DRIFT_IDS[@]}"; do
     case "$TARGET" in
       linux)
         echo "      check decoder chain (sbob.key/exe/path/saddr fields) and CDB list loading" >&2 ;;
+      php)
+        echo "      check decoder chain (sbob.key/exe/path/saddr fields) and CDB list loading" >&2
+        echo "      (php-fpm bundle: slot 1 — rules 1001xx; see docs/php2shell-scenario.md)" >&2 ;;
       windows)
         echo "      check the shipped sysmon parent rule 61600 is loaded and the" >&2
         echo "      eventchannel decoder emits win.system.eventID / win.eventdata.*" >&2 ;;

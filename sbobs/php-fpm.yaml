@@ -1,0 +1,28 @@
+apiVersion: sbob.k8sstormcenter.io/v1
+kind: SoftwareBillOfBehavior
+metadata:
+  name: php-fpm
+  namespace: web-tier
+  annotations:
+    sbob.spec-version: "0.0.4"
+spec:
+  imageID: docker.io/library/php@sha256:a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90
+  execs:
+  - path: /usr/local/sbin/php-fpm
+    args: ['/usr/local/sbin/php-fpm', '⋯⋯']
+  opens:
+  - flags: [O_RDONLY]
+    path: /var/www/html/*
+  - flags: [O_RDONLY, O_WRONLY, O_CREAT]
+    path: /var/lib/php/sessions/*
+  - flags: [O_RDONLY]
+    path: /etc/resolv.conf
+  egress:
+  - identifier: internal-memcache
+    type: internal
+    ipAddresses: [10.96.100.10/32]
+    ports: [{name: TCP-11211, protocol: TCP, port: 11211}]
+  ingress:
+  - identifier: nginx-frontends
+    ipAddresses: [10.244.0.0/16]
+    ports: [{name: TCP-9000, protocol: TCP, port: 9000}]

@@ -1,0 +1,34 @@
+# Drift events: each violates the php-fpm SBoB and MUST fire the mapped rule.
+# These are the PHP2Shell post-exploit behaviors (CVE-2026-109618 /
+# CVE-2026-109619 — see docs/php2shell-scenario.md): the point of the scenario
+# is that the SBoB catches the BEHAVIOR after the in-worker RCE lands,
+# regardless of which CVE was the entry vector.
+#
+#   execve /bin/sh -c ...              -> 100111 (SBoB drift: process ...)
+#        CVE-2026-109618 in-worker RCE: the hijacked php-fpm worker spawns a
+#        shell — php-fpm declares no shell exec, so /bin/sh is drift
+#   open /var/tmp/.php2shell.php       -> 100121 (SBoB drift: file open ...)
+#        the dropped webshell — /var/tmp is not in opens[] (web root is
+#        read-only; session dir is the only declared write path)
+#   connect 45.155.148.12:4444         -> 100131 (SBoB drift: connect ...)
+#        CVE-2026-109619 stale-global-state RCE: the reverse shell / C2
+#        callback — only internal memcache is declared egress
+#   memfd_create (syscall 319)         -> 100163 (SBoB signature: ...)
+#        the fileless variant: the in-worker payload stages itself in a
+#        memfd instead of dropping the webshell (execution-from-memory
+#        signature, node-scoped key, fires by default)
+
+type=SYSCALL msg=audit(1699999990.100:2001): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-exec-php-fpm"
+type=EXECVE msg=audit(1699999990.100:2001): argc=3 a0="/bin/sh" a1="-c" a2="id > /var/tmp/.pwned"
+
+type=SYSCALL msg=audit(1699999991.200:2002): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999991.200:2002): item=0 name="/var/tmp/.php2shell.php" inode=13130 dev=fd:01 mode=0100644 ouid=33 ogid=33 rdev=00:00 nametype=CREATE cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999992.300:2003): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-connect-php-fpm"
+type=SOCKADDR msg=audit(1699999992.300:2003): saddr=0200115C2D9B940C0000000000000000
+
+# Signature event (rulePolicies, M4): node-scoped key fires-by-default; no
+# processAllowed exemption is declared for php-fpm, so this MUST fire.
+#   memfd_create (fileless exec)      -> 100163 (SBoB signature: ...)
+
+type=SYSCALL msg=audit(1699999993.400:2004): arch=c000003e syscall=319 success=yes exit=7 items=1 ppid=3003 pid=3004 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-memfd"

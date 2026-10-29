@@ -95,6 +95,41 @@ node src/cli.ts profile --events windows/legacy-cache.jsonl --workload legacy-ca
 Workload rule IDs are derived deterministically from the slot registry (`docs/sbob-registry.yaml`):
 `rule_id = 100000 + slot*100 + section_code*10 + variant` — see [TDS §6.1](docs/TDS.md).
 
+## Promotion gate (reusable GitHub Action)
+
+The repo ships a composite action wrapping `sbobctl diff` — the M8 release gate in CI form ([#22](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/22)):
+
+```yaml
+jobs:
+  sbob-promotion-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # attaches the delta report to the triggering PR
+    steps:
+      - uses: actions/checkout@v5
+      - uses: DevelApp-ai/Software-Bill-of-Behavior@main   # pin to a tag/SHA in real use
+        with:
+          old: releases/webcache-1.2.yaml   # prior-release SBoB (workspace-relative path)
+          new: releases/webcache-1.3.yaml   # next-release SBoB
+          fail-on: mandatory                # none | advisory | mandatory (default)
+          # namespace: /usr/bin,/app        # optional exec-scoring overrides (comma/newline-separated)
+          # internal-suffix: corp.internal   # optional extra internal DNS suffixes
+          github-token: ${{ github.token }} # optional: comment the delta on the triggering PR
+```
+
+Behavior — deterministic and zero-dependency (Node 22 type stripping, no `npm install`):
+
+- runs `sbobctl diff --old … --new … --fail-on …`, writes `<report-name>.json` (machine-readable delta report) and `<report-name>.delta.md` (verdict markdown), and uploads both as a workflow artifact (always, PR-triggered or not);
+- when `github-token` is set and the event is a pull request, attaches the `*.delta.md` verdict to the triggering PR as a comment;
+- writes a step summary mirroring the verdict line (verdict, Δ score, fail-on threshold);
+- propagates the `sbobctl diff` exit code from `--fail-on` (verdict at/above the threshold ⇒ exit 1), so the gate is green exactly when the release delta is below the threshold;
+- a diff that cannot run (invalid SBoB, workload name mismatch) is an `error` verdict and fails the gate — never green on a broken diff.
+
+Outputs: `verdict` (`clean|advisory|mandatory|error`), `score` (Δ), `exit-code`.
+
+This repo consumes its own action on the committed fixture pair in [`.github/workflows/diff-gate-demo.yml`](.github/workflows/diff-gate-demo.yml): the **fixture-verify** job asserts the contract on every PR (clean pair passes; drifted pair fails MANDATORY with exit 1, asserted via `continue-on-error` so ordinary PRs stay green), and a `demo/promotion-*` branch gets the real red **promotion-gate** check with both reports attached — the #22 exit-criteria demo promotion PR.
+
 ## The derivation loop (M9)
 
 Most real-world workloads ship no vendor SBoB. The profiler is the on-ramp for them: it consumes a window of **normalized `sbob.*` events** (the same field contract the drift decoders emit — JSONL), clusters them per workload × section, classifies every entry **steady · periodic · sporadic · one-off** (calibratable thresholds), applies the mandatory disposition taxonomy (**declare · hold · exempt-with-expiry · investigate** — no "no decision" states), and emits a candidate SBoB plus a provenance sidecar for human review. Kernel/runtime telemetry (`auditd`, `sysmon`, `ebpf`) is the only confirming source — entries seen only by flow logs or app logs are marked unverified and excluded. Workloads with open incident labels are quarantined: no candidate until remediated. A reviewer who overrides a held or investigated entry to `declare` must write the reason, or the run fails — **no unexplained observation becomes a plain allow.** With `--baseline`, the candidate's first reviewed delta scores through the M8 diff gate. See [TDS §17](docs/TDS.md).
@@ -113,4 +148,12 @@ scripts/                golden regeneration + wazuh-logtest lab harness + podmap
 
 ## Lab validation
 
-Generated bundles carry a `LAB VALIDATION PENDING` banner until validated against a live Wazuh manager. Run `scripts/logtest-corpus.sh` (linux), `scripts/logtest-corpus.sh windows` or `scripts/logtest-corpus.sh k8s` on a lab manager with the bundle installed: the benign corpus must stay silent and the drift corpus must fire the mapped drift rules (linux: 100011/100021/100031 plus signatures 100060/100062; windows: 100016/100006/100026/100036/100007; k8s: 100011/100021/100031 plus the attribution chain — rule 100071 flags podmap-unresolved, and `scripts/sbob-podmap-refresh.sh` seeds the map to silence it). The 62-attack kill-chain mapping is documented in [docs/attack-matrix.md](docs/attack-matrix.md).
+Generated bundles carry a `LAB VALIDATION PENDING` banner until validated against a live Wazuh manager. Run `scripts/logtest-corpus.sh` (linux), `scripts/logtest-corpus.sh windows`, `scripts/logtest-corpus.sh k8s` or `scripts/logtest-corpus.sh php` on a lab manager with the bundle installed: the benign corpus must stay silent and the drift corpus must fire the mapped drift rules (linux: 100011/100021/100031 plus signatures 100060/100062; windows: 100016/100006/100026/100036/100007; k8s: 100011/100021/100031 plus the attribution chain — rule 100071 flags podmap-unresolved, and `scripts/sbob-podmap-refresh.sh` seeds the map to silence it). The 62-attack kill-chain mapping is documented in [docs/attack-matrix.md](docs/attack-matrix.md).
+
+The `php` target replays the PHP2Shell scenario ([docs/php2shell-scenario.md](docs/php2shell-scenario.md), issue [#23](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/23)): the `sbobs/php-fpm.yaml` workload (slot 1, rule band `1001xx`) maps the October 2026 PHP RCEs (CVE-2026-109618 / CVE-2026-109619) onto post-exploit behavior drift — `/bin/sh` exec from a hijacked worker (**100111**), webshell drop (**100121**), reverse-shell C2 connect (**100131**) and the memfd fileless variant (**100163**) — proving the SBoB catches the behavior regardless of the entry vector.
+
+For **detection testing** in the Wazuh sense, `scripts/logtest-api.ts` drives the same corpora through the Wazuh server logtest API (`PUT /logtest`, Wazuh ≥ 4.4): JSON-asserted rule ids instead of grepped CLI text, session-token continuity for `firedtimes`, and a sustained gate that replays the drift corpus eight times in one session to make the **frequency children fire** (php: 100112/100122/100132 — 8 matches / 120s), which a one-shot `wazuh-logtest` pipe cannot prove. Logic is unit-tested against mocked API responses (`test/logtest-api.test.ts`); only the live lab run remains unverified.
+
+### Automated lab validation (CI, issue #23)
+
+[`.github/workflows/lab-validate.yml`](.github/workflows/lab-validate.yml) runs the whole loop against a **disposable, containerized Wazuh manager** (`wazuh/wazuh-manager`, pinned 4.14.6) as a per-target matrix (linux, windows, k8s, php): transpile → `sync-manager.sh` install (with every generated CDB list declared in `ossec.conf`, because Wazuh does not auto-load lists) → manager restart → **corpus gate** (`wazuh-logtest` inside the container: benign corpus silent, drift corpus fires the mapped rules) → **API detection gate** (`logtest-api.ts` from the runner: JSON-asserted rule ids plus the sustained frequency children). It runs nightly, on `workflow_dispatch`, and on PRs carrying the `lab-validate` label — ordinary PRs stay fast. A green matrix run is validation against a live manager; the manifests' `labValidation` banners can be flipped on the back of its run URL, and the README statuses above track what the latest run proved.
