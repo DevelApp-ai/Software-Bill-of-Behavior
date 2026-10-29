@@ -427,5 +427,15 @@
     "rulePolicies: section-absent — signature pack emitted with defaults (fire-by-default, no exemptions; TDS 7.4)",
     "signatures: audit keys are node-scoped (Mode B, attribution-weak) — declare processAllowed for container runtimes and node daemons (kubelet, containerd) to suppress expected noise"
   ],
-  "labValidation": "pending"
+  "labValidation": "validated",
+  "labValidationEvidence": {
+    "targets": [
+      "linux",
+      "windows",
+      "k8s-node"
+    ],
+    "manager": "wazuh/wazuh-manager:4.14.6",
+    "date": "2026-10-29",
+    "evidence": "https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214"
+  }
 }

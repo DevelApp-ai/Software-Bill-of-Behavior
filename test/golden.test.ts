@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { parseYaml } from "../src/yaml.ts";
 import { validateSbob } from "../src/schema.ts";
 import { buildIR } from "../src/ir.ts";
-import { makeAllocator } from "../src/ruleids.ts";
+import { makeAllocator, labForTarget, parseLabValidations } from "../src/ruleids.ts";
 import { generateLinuxBundle } from "../src/codegen/linux.ts";
 import { generateWindowsBundle } from "../src/codegen/windows.ts";
 import { generateK8sNodeBundle } from "../src/codegen/k8s.ts";
@@ -45,17 +45,23 @@ function redisIR() {
   return buildIR(validateSbob(parsed), parsed);
 }
 
+// committed lab-validation evidence (docs/lab-validation.yaml): the goldens are
+// regenerated with the same flag the CI corpus gate proved (scripts/regen-golden.ts)
+const labValidations = parseLabValidations(
+  readFileSync(new URL("../docs/lab-validation.yaml", import.meta.url), "utf8"),
+);
+
 test("regenerated linux bundle is byte-identical to the committed golden (run scripts/regen-golden.ts after intentional changes)", () => {
   checkGolden(join(import.meta.dirname, "golden/redis-linux"),
-    generateLinuxBundle(redisIR(), makeAllocator("redis", 0)));
+    generateLinuxBundle(redisIR(), makeAllocator("redis", 0, labForTarget(labValidations, "redis", "linux"))));
 });
 
 test("regenerated windows bundle is byte-identical to the committed golden (run scripts/regen-golden.ts after intentional changes)", () => {
   checkGolden(join(import.meta.dirname, "golden/redis-windows"),
-    generateWindowsBundle(redisIR(), makeAllocator("redis", 0)));
+    generateWindowsBundle(redisIR(), makeAllocator("redis", 0, labForTarget(labValidations, "redis", "windows"))));
 });
 
 test("regenerated k8s bundle is byte-identical to the committed golden (run scripts/regen-golden.ts after intentional changes)", () => {
   checkGolden(join(import.meta.dirname, "golden/redis-k8s"),
-    generateK8sNodeBundle(redisIR(), makeAllocator("redis", 0)));
+    generateK8sNodeBundle(redisIR(), makeAllocator("redis", 0, labForTarget(labValidations, "redis", "k8s-node"))));
 });

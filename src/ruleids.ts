@@ -92,15 +92,81 @@ export function slotFor(ir_name: string, reg: SlotRegistry): number {
   return next;
 }
 
+/**
+ * Lab-validation evidence record (docs/lab-validation.yaml; M1-M4 exit
+ * criteria, issues #2/#3/#4/#5). A record for a workload x target means the
+ * generated bundle was replayed against a live Wazuh manager by
+ * .github/workflows/lab-validate.yml (corpus gate + API detection gate) and
+ * passed; the record carries the pinned manager image, the validation date
+ * and the Actions run URL as committed evidence.
+ */
+export interface LabValidation {
+  /** validated codegen targets (linux | windows | k8s-node) */
+  targets: string[];
+  /** pinned manager image the corpus was replayed against */
+  manager: string;
+  /** validation date (YYYY-MM-DD) */
+  date: string;
+  /** Actions run URL of the green lab-validate matrix */
+  evidence: string;
+}
+
+export function parseLabValidations(source: string): Map<string, LabValidation> {
+  const root = asMap(parseYaml(source));
+  const list = root["validations"];
+  if (list === undefined) {
+    throw new SbobError("ERR_LAB_VALIDATION", "lab-validation file: missing top-level `validations:` list");
+  }
+  if (!Array.isArray(list)) {
+    throw new SbobError("ERR_LAB_VALIDATION", "lab-validation file: `validations` must be a list");
+  }
+  const out = new Map<string, LabValidation>();
+  for (const entry of list) {
+    const m = asMap(entry);
+    const workload = asString(m["workload"]);
+    const manager = asString(m["manager"]);
+    const date = asString(m["date"]);
+    const evidence = asString(m["evidence"]);
+    const rawTargets = m["targets"];
+    if (!Array.isArray(rawTargets) || rawTargets.length === 0) {
+      throw new SbobError("ERR_LAB_VALIDATION", `lab-validation record for "${workload}": targets must be a non-empty list`);
+    }
+    const targets = rawTargets.map((t) => asString(t));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new SbobError("ERR_LAB_VALIDATION", `lab-validation record for "${workload}": date must be YYYY-MM-DD ("${date}")`);
+    }
+    if (!/^https?:\/\//.test(evidence)) {
+      throw new SbobError("ERR_LAB_VALIDATION", `lab-validation record for "${workload}": evidence must be an http(s) URL ("${evidence}")`);
+    }
+    if (out.has(workload)) {
+      throw new SbobError("ERR_LAB_VALIDATION", `lab-validation record for "${workload}" appears twice`);
+    }
+    out.set(workload, { targets, manager, date, evidence });
+  }
+  return out;
+}
+
+/**
+ * Target-filtered evidence lookup: a record only stamps bundles whose codegen
+ * target is listed in it. The caller (transpile / golden regeneration) owns
+ * the filter so the allocator never needs to know the target.
+ */
+export function labForTarget(validations: Map<string, LabValidation>, workload: string, target: string): LabValidation | undefined {
+  const rec = validations.get(workload);
+  return rec !== undefined && rec.targets.includes(target) ? rec : undefined;
+}
+
 export interface IdAllocator {
   slot: number;
   /** Track issued IDs to detect collisions within a bundle. */
   issued: Map<number, string>;
+  /** Lab-validation evidence for this workload x target, when committed (docs/lab-validation.yaml). */
+  lab?: LabValidation;
   linux(section: keyof typeof SECTION_CODES, kind: keyof typeof LINUX_VARIANTS): number;
   windows(section: keyof typeof SECTION_CODES, kind: keyof typeof WINDOWS_VARIANTS): number;
 }
 
-export function makeAllocator(workload: string, slot: number): IdAllocator {
+export function makeAllocator(workload: string, slot: number, lab?: LabValidation): IdAllocator {
   const issued = new Map<number, string>();
   const alloc = (section: number, variant: number): number => {
     const id = ID_BAND_MIN + slot * 100 + section * 10 + variant;
@@ -117,6 +183,7 @@ export function makeAllocator(workload: string, slot: number): IdAllocator {
   return {
     slot,
     issued,
+    lab,
     linux(section, kind) {
       return alloc(SECTION_CODES[section], LINUX_VARIANTS[kind]);
     },

@@ -428,5 +428,15 @@
     "windows: requires the shipped ruleset parent rule 61600 and Wazuh >= 4.4 (type=\"pcre2\" field attribute)",
     "windows: rulePolicies signature rules are deferred to a later milestone (auditd-keyed rules have no Sysmon equivalent yet; flagged partial SIG_WIN_DEFERRED in the coverage matrix)"
   ],
-  "labValidation": "pending"
+  "labValidation": "validated",
+  "labValidationEvidence": {
+    "targets": [
+      "linux",
+      "windows",
+      "k8s-node"
+    ],
+    "manager": "wazuh/wazuh-manager:4.14.6",
+    "date": "2026-10-29",
+    "evidence": "https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214"
+  }
 }

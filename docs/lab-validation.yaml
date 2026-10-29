@@ -1,0 +1,27 @@
+# sbobctl lab-validation evidence (M1-M4 exit criteria, issues #2/#3/#4/#5).
+#
+# One record per workload whose generated bundle was replayed against a live
+# Wazuh manager by .github/workflows/lab-validate.yml (corpus gate +
+# API detection gate) and passed. Presence of a record here is the flip:
+# `sbobctl transpile --lab-validation docs/lab-validation.yaml` stamps every
+# workload x target listed below as LAB VALIDATED (banner + manifest evidence
+# field); pairs without a record keep the LAB VALIDATION PENDING banner.
+# The golden bundles under test/golden/ are regenerated with the same flag.
+#
+# fields:
+#   workload  SBoB workload name (must match the IR workload name)
+#   targets   validated codegen targets (linux | windows | k8s-node)
+#   manager   pinned manager image the corpus was replayed against
+#   date      validation date (YYYY-MM-DD)
+#   evidence  Actions run URL of the green lab-validate matrix
+validations:
+  - workload: redis
+    targets: [linux, windows, k8s-node]
+    manager: wazuh/wazuh-manager:4.14.6
+    date: "2026-10-29"
+    evidence: https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214
+  - workload: php-fpm
+    targets: [linux]
+    manager: wazuh/wazuh-manager:4.14.6
+    date: "2026-10-29"
+    evidence: https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214

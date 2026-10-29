@@ -60,8 +60,20 @@ import {
 } from "./opshealth.ts";
 import { buildCoverageMatrix, assertCoverageComplete } from "../coverage.ts";
 
-const LAB_NOTE =
+const LAB_NOTE_PENDING =
   "LAB VALIDATION PENDING (M3 exit criteria): replay scripts/logtest-corpus.sh k8s corpus on a lab k8s node with a live wazuh manager";
+
+/**
+ * Banner line for generated XML headers (M3 exit criteria): LAB VALIDATED with
+ * the committed evidence (docs/lab-validation.yaml, stamped via the
+ * --lab-validation transpile flag) or the pending instruction.
+ */
+function labNote(alloc: IdAllocator): string {
+  const lab = alloc.lab;
+  return lab
+    ? `LAB VALIDATED (${lab.date}, ${lab.manager}): evidence ${lab.evidence}`
+    : LAB_NOTE_PENDING;
+}
 
 /** Shipped docker-integration base rule (0560-docker_integration_rules.xml). */
 export const DOCKER_PARENT_RULE = 87900;
@@ -150,7 +162,7 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       },
     ];
     const xml = [
-      xmlFileHeader(`sbob decoders for workload ${name} — k8s-node target (audit + cgroup attribution)`, name, LAB_NOTE),
+      xmlFileHeader(`sbob decoders for workload ${name} — k8s-node target (audit + cgroup attribution)`, name, labNote(alloc)),
       "",
       ...decoders.map(renderDecoder).join("\n\n").split("\n"),
       "",
@@ -255,7 +267,7 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
     rules.push(...envoyRules(ir, alloc, name));
 
     const xml = [
-      xmlFileHeader(`sbob drift + attribution + signature + ops rules for workload ${name} — k8s-node target`, name, LAB_NOTE),
+      xmlFileHeader(`sbob drift + attribution + signature + ops rules for workload ${name} — k8s-node target`, name, labNote(alloc)),
       "",
       ...rules.map(renderRule).join("\n\n").split("\n"),
       "",
@@ -313,7 +325,8 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
                 ? ["ops: sbob-cadence rule (8,1) alerts on digest mismatches between running containers and the pinned imageID; tag-only image references are not verifiable from docker events (TDS 10.3)"]
                 : []),
             ],
-            labValidation: "pending",
+            labValidation: alloc.lab ? "validated" : "pending",
+            ...(alloc.lab ? { labValidationEvidence: alloc.lab } : {}),
           },
           null,
           2,

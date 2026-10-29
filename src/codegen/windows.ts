@@ -39,8 +39,20 @@ import { buildCoverageMatrix, assertCoverageComplete } from "../coverage.ts";
 import type { XmlRule } from "./xml.ts";
 import { renderRule, xmlFileHeader } from "./xml.ts";
 
-const LAB_NOTE =
+const LAB_NOTE_PENDING =
   "LAB VALIDATION PENDING (M2 exit criteria): replay scripts/logtest-corpus.sh corpus on a lab Windows host with Sysmon and a live wazuh manager";
+
+/**
+ * Banner line for generated XML headers (M2 exit criteria): LAB VALIDATED with
+ * the committed evidence (docs/lab-validation.yaml, stamped via the
+ * --lab-validation transpile flag) or the pending instruction.
+ */
+function labNote(alloc: IdAllocator): string {
+  const lab = alloc.lab;
+  return lab
+    ? `LAB VALIDATED (${lab.date}, ${lab.manager}): evidence ${lab.evidence}`
+    : LAB_NOTE_PENDING;
+}
 
 /** The shipped Sysmon eventchannel parent rule (0595-win-sysmon_rules.xml). */
 export const SYSMON_PARENT_RULE = 61600;
@@ -352,7 +364,7 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
     }
 
     const xml = [
-      xmlFileHeader(`sbob drift rules for workload ${name} — Windows / Sysmon target`, name, LAB_NOTE),
+      xmlFileHeader(`sbob drift rules for workload ${name} — Windows / Sysmon target`, name, labNote(alloc)),
       "",
       ...rules.map(renderRule).join("\n\n").split("\n"),
       "",
@@ -394,7 +406,8 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
               "windows: requires the shipped ruleset parent rule 61600 and Wazuh >= 4.4 (type=\"pcre2\" field attribute)",
               "windows: rulePolicies signature rules are deferred to a later milestone (auditd-keyed rules have no Sysmon equivalent yet; flagged partial SIG_WIN_DEFERRED in the coverage matrix)",
             ],
-            labValidation: "pending",
+            labValidation: alloc.lab ? "validated" : "pending",
+            ...(alloc.lab ? { labValidationEvidence: alloc.lab } : {}),
           },
           null,
           2,
