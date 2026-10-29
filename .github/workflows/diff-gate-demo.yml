@@ -38,13 +38,16 @@ jobs:
         run: |
           test "${{ steps.drift.outcome }}" = "failure"
           test "${{ steps.drift.outputs.verdict }}" = "mandatory"
+          test "${{ steps.drift.outputs.score }}" = "45"
           test "${{ steps.drift.outputs.exit-code }}" = "1"
-          echo "diff-gate action contract OK: drifted fixture pair fails MANDATORY with exit 1; clean pair stays green"
+          echo "diff-gate action contract OK: drifted fixture pair fails MANDATORY (Δ = 45) with exit 1; clean pair stays green"
 
   # (b) promotion-gate — the real promotion flow demo (issue #22 exit
   # criteria): runs only on demo/promotion-* branches, where the red
   # mandatory check on the drifted fixture pair is the acceptance evidence.
   # Attaches the delta report (markdown + JSON artifact) to the demo PR.
+  # The standing record of the demonstrated evidence (PR #27) lives in
+  # docs/diff-gate-demo.md — demo PRs may be closed once the run is captured.
   promotion-gate:
     if: ${{ startsWith(github.head_ref, 'demo/promotion-') }}
     runs-on: ubuntu-latest
