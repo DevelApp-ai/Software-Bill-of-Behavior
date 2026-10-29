@@ -51,6 +51,10 @@ options:
                                  sigma / velociraptor / mde / falco (M6, TDS 13)
   --skip-signature-verify       skip SBoB signature verification (development profiles only)
   --confirm-none <section,...>  accept explicitly-empty (NONE) sections
+  --lab-validation <path>       (transpile) lab-validation evidence file
+                                 (docs/lab-validation.yaml): bundles whose workload
+                                 record lists --target are stamped LAB VALIDATED
+                                 with the evidence; unlisted pairs stay pending
   --state <path>                 (enforce) per-workload rollout state file (TDS 14)
   --enforced-np <path>           (enforce) peers JSON of the live NetworkPolicy (np-diff, TDS 14.4)
   --old <path>                  (diff) prior-release SBoB YAML
@@ -92,6 +96,7 @@ interface Args {
   target: string;
   skipSignatureVerify: boolean;
   confirmNone: string[];
+  labValidation: string;
   oldSbob: string;
   newSbob: string;
   report: string;
@@ -123,6 +128,7 @@ function parseArgs(argv: string[]): Args {
     target: "linux",
     skipSignatureVerify: false,
     confirmNone: [],
+    labValidation: "",
     oldSbob: "",
     newSbob: "",
     report: "",
@@ -158,7 +164,8 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--skip-signature-verify") args.skipSignatureVerify = true;
     else if (a === "--confirm-none") {
       args.confirmNone = next().split(",").map((s) => s.trim()).filter(Boolean);
-    } else if (a === "--old") args.oldSbob = next();
+    } else if (a === "--lab-validation") args.labValidation = next();
+    else if (a === "--old") args.oldSbob = next();
     else if (a === "--new") args.newSbob = next();
     else if (a === "--report") args.report = next();
     else if (a === "--fail-on") {
@@ -214,6 +221,7 @@ async function main(): Promise<void> {
         target: args.target as "linux" | "windows" | "k8s-node" | "sigma" | "velociraptor" | "mde" | "falco",
         skipSignatureVerify: args.skipSignatureVerify,
         confirmNone: args.confirmNone,
+        labValidationPath: args.labValidation || undefined,
       });
       for (const w of result.workloads) {
         console.log(`workload ${w.name} (slot ${w.slot}): ${w.files.length} files`);

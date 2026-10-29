@@ -8,7 +8,7 @@ import { parseYaml } from "./yaml.ts";
 import { validateSbob } from "./schema.ts";
 import { buildIR } from "./ir.ts";
 import { lintIR } from "./lint.ts";
-import { makeAllocator, parseRegistry, registryToYaml, slotFor, type SlotRegistry } from "./ruleids.ts";
+import { labForTarget, makeAllocator, parseLabValidations, parseRegistry, registryToYaml, slotFor, type LabValidation, type SlotRegistry } from "./ruleids.ts";
 import { makeVerifier, type SignatureVerifier } from "./signature.ts";
 import { generateLinuxBundle, type BundleFile } from "./codegen/linux.ts";
 import { generateWindowsBundle } from "./codegen/windows.ts";
@@ -25,6 +25,8 @@ export interface TranspileOptions {
   target: "linux" | "windows" | "k8s-node" | "sigma" | "velociraptor" | "mde" | "falco";
   skipSignatureVerify: boolean;
   confirmNone: string[];
+  /** Lab-validation evidence file (docs/lab-validation.yaml); stamps validated bundles. */
+  labValidationPath?: string;
 }
 
 export interface TranspileResult {
@@ -36,7 +38,7 @@ export interface TranspileResult {
 export async function transpile(sbobPaths: string[], opts: TranspileOptions): Promise<TranspileResult> {
   const verifier = makeVerifier(opts.skipSignatureVerify);
 
-  // 1. registry
+  // 1. registry + lab-validation evidence
   let registry: SlotRegistry;
   let registryOriginal = "";
   try {
@@ -46,6 +48,9 @@ export async function transpile(sbobPaths: string[], opts: TranspileOptions): Pr
     if (e !== null && typeof e === "object" && "code" in e && (e as any).code !== "ENOENT") throw e;
     registry = { slots: new Map() };
   }
+  const labValidations: Map<string, LabValidation> = opts.labValidationPath
+    ? parseLabValidations(readFileSync(opts.labValidationPath, "utf8"))
+    : new Map();
 
   // 2. parse, verify, lint each SBoB
   const irs: IR[] = [];
@@ -76,7 +81,8 @@ export async function transpile(sbobPaths: string[], opts: TranspileOptions): Pr
   const workloads: TranspileResult["workloads"] = [];
   for (const ir of irs) {
     const slot = slotFor(ir.workload.name, registry);
-    const alloc = makeAllocator(ir.workload.name, slot);
+    // target-filtered: only stamp the bundle when the evidence record lists this target
+    const alloc = makeAllocator(ir.workload.name, slot, labForTarget(labValidations, ir.workload.name, opts.target));
     const files =
       opts.target === "linux"
         ? generateLinuxBundle(ir, alloc)

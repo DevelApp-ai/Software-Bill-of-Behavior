@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { parseYaml } from "../src/yaml.ts";
 import { validateSbob } from "../src/schema.ts";
 import { buildIR } from "../src/ir.ts";
-import { makeAllocator, parseRegistry } from "../src/ruleids.ts";
+import { labForTarget, makeAllocator, parseLabValidations, parseRegistry } from "../src/ruleids.ts";
 import { generateLinuxBundle } from "../src/codegen/linux.ts";
 import { generateWindowsBundle } from "../src/codegen/windows.ts";
 import { generateK8sNodeBundle } from "../src/codegen/k8s.ts";
@@ -23,16 +23,22 @@ import { generateK8sNodeBundle } from "../src/codegen/k8s.ts";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const sbobPath = join(root, "sbobs/redis.yaml");
 const registryPath = join(root, "docs/sbob-registry.yaml");
+const labValidationPath = join(root, "docs/lab-validation.yaml");
 
 const raw = readFileSync(sbobPath, "utf8");
 const parsed = parseYaml(raw);
 const ir = buildIR(validateSbob(parsed), parsed);
 const slot = parseRegistry(readFileSync(registryPath, "utf8")).slots.get("redis") ?? 0;
 
+// committed lab-validation evidence (docs/lab-validation.yaml): the goldens
+// carry the LAB VALIDATED banner/manifest for the workload x target pairs the
+// referenced Actions run proved; pairs without a record keep the pending banner
+const redisLab = parseLabValidations(readFileSync(labValidationPath, "utf8"));
+
 const bundles: Array<{ dir: string; files: ReturnType<typeof generateLinuxBundle> }> = [
-  { dir: join(root, "test/golden/redis-linux"), files: generateLinuxBundle(ir, makeAllocator("redis", slot)) },
-  { dir: join(root, "test/golden/redis-windows"), files: generateWindowsBundle(ir, makeAllocator("redis", slot)) },
-  { dir: join(root, "test/golden/redis-k8s"), files: generateK8sNodeBundle(ir, makeAllocator("redis", slot)) },
+  { dir: join(root, "test/golden/redis-linux"), files: generateLinuxBundle(ir, makeAllocator("redis", slot, labForTarget(redisLab, "redis", "linux"))) },
+  { dir: join(root, "test/golden/redis-windows"), files: generateWindowsBundle(ir, makeAllocator("redis", slot, labForTarget(redisLab, "redis", "windows"))) },
+  { dir: join(root, "test/golden/redis-k8s"), files: generateK8sNodeBundle(ir, makeAllocator("redis", slot, labForTarget(redisLab, "redis", "k8s-node"))) },
 ];
 
 for (const bundle of bundles) {

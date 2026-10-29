@@ -436,5 +436,15 @@
     "ops: config-check rule (8,3) compares the node digest from the command-wodle script against this bundle; multi-workload nodes see it fire on key-set differences (TDS 10.1)",
     "ops: sbob-cadence rule (8,1) alerts on digest mismatches between running containers and the pinned imageID; tag-only image references are not verifiable from docker events (TDS 10.3)"
   ],
-  "labValidation": "pending"
+  "labValidation": "validated",
+  "labValidationEvidence": {
+    "targets": [
+      "linux",
+      "windows",
+      "k8s-node"
+    ],
+    "manager": "wazuh/wazuh-manager:4.14.6",
+    "date": "2026-10-29",
+    "evidence": "https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214"
+  }
 }

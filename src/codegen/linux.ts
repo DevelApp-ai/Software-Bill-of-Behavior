@@ -38,7 +38,20 @@ export interface BundleFile {
   content: string;
 }
 
-const LAB_NOTE = "LAB VALIDATION PENDING (M1 exit criteria): run scripts/logtest-corpus.sh against a lab node with a live wazuh manager";
+const LAB_NOTE_PENDING =
+  "LAB VALIDATION PENDING (M1 exit criteria): run scripts/logtest-corpus.sh against a lab node with a live wazuh manager";
+
+/**
+ * Banner line for generated XML headers (M1 exit criteria): LAB VALIDATED with
+ * the committed evidence (docs/lab-validation.yaml, stamped via the
+ * --lab-validation transpile flag) or the pending instruction.
+ */
+export function labNote(alloc: IdAllocator): string {
+  const lab = alloc.lab;
+  return lab
+    ? `LAB VALIDATED (${lab.date}, ${lab.manager}): evidence ${lab.evidence}`
+    : LAB_NOTE_PENDING;
+}
 
 // ---------------------------------------------------------------------------
 // Shared building blocks (also consumed by src/codegen/k8s.ts)
@@ -384,7 +397,7 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
   {
     const decoders = [...auditDecoders(name, auditKeys), configCheckDecoder(name)];
     const xml = [
-      xmlFileHeader(`sbob decoders for workload ${name} — routing on generated audit keys`, name, LAB_NOTE),
+      xmlFileHeader(`sbob decoders for workload ${name} — routing on generated audit keys`, name, labNote(alloc)),
       "",
       ...decoders.map(renderDecoder).join("\n\n").split("\n"),
       "",
@@ -397,7 +410,7 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
     const base = linuxSectionRules(ir, alloc);
     const rules = [...base, ...signatureRulesShared(ir, alloc, base), configCheckRule(ir, alloc, configDigest)];
     const xml = [
-      xmlFileHeader(`sbob drift + signature + ops rules for workload ${name} — Linux / k8s-node target`, name, LAB_NOTE),
+      xmlFileHeader(`sbob drift + signature + ops rules for workload ${name} — Linux / k8s-node target`, name, labNote(alloc)),
       "",
       ...rules.map(renderRule).join("\n\n").split("\n"),
       "",
@@ -444,7 +457,8 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
             files: files.map((f) => f.path),
             coverage,
             coverageNotes: [...ir.coverageNotes, ...signatureCoverageNotes(ir)],
-            labValidation: "pending",
+            labValidation: alloc.lab ? "validated" : "pending",
+            ...(alloc.lab ? { labValidationEvidence: alloc.lab } : {}),
           },
           null,
           2,
