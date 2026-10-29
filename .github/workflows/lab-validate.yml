@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write   # failure diagnostics are posted as PR comments
 
 env:
   # The disposable "lab manager" of this workflow is a pinned container:
@@ -61,14 +62,45 @@ jobs:
           docker run -d --name "$WAZUH_CONTAINER" \
             -p 1514:1514 -p 1515:1515 -p 55000:55000 \
             "$WAZUH_IMAGE"
-          for i in $(seq 1 36); do
+          # wait up to 8 min: any HTTP response (even 401) means the API is listening
+          for i in $(seq 1 96); do
             code=$(curl -sk -o /dev/null -w '%{http_code}' "$WAZUH_API" || true)
-            if [ "$code" = "200" ]; then echo "manager API up (HTTP $code)"; exit 0; fi
+            if [ "$code" != "000" ] && [ -n "$code" ]; then echo "manager API up (HTTP $code after ~$((i*5))s)"; exit 0; fi
+            if [ $((i % 12)) -eq 0 ]; then echo "...still waiting for the API (HTTP $code)"; fi
             sleep 5
           done
           echo "manager API did not come up"
-          docker logs --tail 80 "$WAZUH_CONTAINER" || true
           exit 1
+
+      - name: Post manager diagnostics to the PR (failure path)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "## lab-validate diagnostics — target \`${{ matrix.target }}\`"
+            echo '```'
+            echo "--- docker ps -a ---"; docker ps -a 2>&1 || true
+            echo "--- docker logs (tail 150) ---"; docker logs --tail 150 "$WAZUH_CONTAINER" 2>&1 || true
+            echo "--- ossec.log (tail 40) ---"
+            docker exec "$WAZUH_CONTAINER" sh -c 'tail -40 /var/ossec/logs/ossec.log' 2>&1 || true
+            echo "--- wazuh-control status ---"
+            docker exec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control status 2>&1 || true
+            echo "--- api probe (curl -skv) ---"
+            curl -skv "$WAZUH_API/" 2>&1 | tail -25 || true
+            echo "--- corpus-gate.log (tail 60) ---"
+            tail -60 corpus-gate.log 2>&1 || true
+            echo "--- api-gate.log (tail 60) ---"
+            tail -60 api-gate.log 2>&1 || true
+            echo "--- corpus outputs inside the container ---"
+            docker exec "$WAZUH_CONTAINER" sh -c 'tail -30 /tmp/sbob-benign.out /tmp/sbob-drift.out' 2>&1 || true
+            echo '```'
+          } > diag.md
+          cat diag.md
+          if [ -n "${PR_NUMBER:-}" ] && command -v gh >/dev/null 2>&1; then
+            gh pr comment "$PR_NUMBER" --body-file diag.md || echo "(could not post diagnostics comment)"
+          fi
 
       - name: Transpile the bundle (sbob ${{ matrix.sbob }}, --target ${{ matrix.transpile-target }})
         run: |
@@ -106,14 +138,12 @@ jobs:
       - name: Restart the manager and wait for the API (bundle must load cleanly)
         run: |
           docker exec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control restart
-          for i in $(seq 1 36); do
+          for i in $(seq 1 60); do
             code=$(curl -sk -o /dev/null -w '%{http_code}' "$WAZUH_API" || true)
-            if [ "$code" = "200" ]; then echo "manager API up after restart"; exit 0; fi
+            if [ "$code" != "000" ] && [ -n "$code" ]; then echo "manager API up after restart (HTTP $code)"; exit 0; fi
             sleep 5
           done
           echo "manager API did not come back after the bundle install"
-          docker exec "$WAZUH_CONTAINER" sh -c "grep -iE 'error|invalid|warn' /var/ossec/logs/ossec.log | tail -25" || true
-          docker logs --tail 80 "$WAZUH_CONTAINER" || true
           exit 1
 
       - name: Corpus gate (wazuh-logtest — benign corpus silent, drift corpus fires)
@@ -123,9 +153,9 @@ jobs:
           docker cp test "$WAZUH_CONTAINER:/test"
           docker cp scripts "$WAZUH_CONTAINER:/sbob-scripts"
           docker exec -e SBOB_TARGET="${{ matrix.target }}" "$WAZUH_CONTAINER" \
-            bash -c 'PATH="/var/ossec/bin:$PATH" bash /sbob-scripts/logtest-corpus.sh "$SBOB_TARGET"'
+            bash -c 'PATH="/var/ossec/bin:$PATH" bash /sbob-scripts/logtest-corpus.sh "$SBOB_TARGET"' 2>&1 | tee corpus-gate.log
 
       - name: API detection gate (logtest API — JSON-asserted ids + sustained frequency children)
         run: |
           SBOB_WAZUH_API_USER="$WAZUH_API_USER" SBOB_WAZUH_API_PASS="$WAZUH_API_PASS" \
-            node scripts/logtest-api.ts --target "${{ matrix.target }}" --api "$WAZUH_API"
+            node scripts/logtest-api.ts --target "${{ matrix.target }}" --api "$WAZUH_API" 2>&1 | tee api-gate.log
