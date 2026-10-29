@@ -98,8 +98,13 @@ jobs:
             echo '```'
           } > diag.md
           cat diag.md
-          if [ -n "${PR_NUMBER:-}" ] && command -v gh >/dev/null 2>&1; then
-            gh pr comment "$PR_NUMBER" --body-file diag.md || echo "(could not post diagnostics comment)"
+          if [ -n "${PR_NUMBER:-}" ]; then
+            jq -n --rawfile body diag.md '{body: $body}' > payload.json
+            curl -sS -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -d @payload.json >/dev/null || echo "(could not post diagnostics comment)"
           fi
 
       - name: Transpile the bundle (sbob ${{ matrix.sbob }}, --target ${{ matrix.transpile-target }})
@@ -112,7 +117,8 @@ jobs:
         run: |
           # 1. stage into the manager layout — the exact lab mapping of
           #    scripts/sync-manager.sh (rules/decoders flattened, CDB lists path-preserved)
-          scripts/sync-manager.sh dist/bundle --root staging
+          # (invoked via sh: the checked-out file may not carry the exec bit)
+          sh scripts/sync-manager.sh dist/bundle --root staging
           find staging/rules staging/decoders staging/lists -type f | sort
 
           # 2. copy into the container's /var/ossec/etc/{rules,decoders,lists}
