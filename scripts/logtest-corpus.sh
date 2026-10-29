@@ -51,6 +51,11 @@
 # (0560-docker_integration_rules.xml, parent rule 87900) for rule 100074.
 # wazuh-logtest reads the manager's live ruleset; it does not take a rules
 # path argument.
+#
+# For detection testing in the Wazuh sense (JSON-asserted rule ids, session
+# firedtimes continuity, and a sustained gate that proves the frequency
+# children 8/120s by replaying the drift corpus 8x in one logtest session),
+# use the API-driven variant: scripts/logtest-api.ts --target <target>.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 

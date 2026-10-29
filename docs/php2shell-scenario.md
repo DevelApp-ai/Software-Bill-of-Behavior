@@ -59,8 +59,24 @@ scripts/logtest-corpus.sh php
 
 Stage 2 (live-workload drift in a sealed lab) and Stage 3 (enforcement: Calico-staged NP, AppArmor complain→enforce) follow the runbook; `labValidation: pending` stays on the manifests until then.
 
+### Detection testing via the Wazuh API (JSON-asserted, session-based)
+
+The `wazuh-logtest` CLI pipes above are text-only and one-shot: they assert on grepped text, and they cannot prove the **sustained drift rules** (frequency 8 / 120s) because nothing accumulates state across corpus lines. The Wazuh server logtest API (Wazuh ≥ 4.4, `<rule_test>` enabled — `PUT /logtest`, `DELETE /logtest/sessions/{token}`) fixes both, and `scripts/logtest-api.ts` wraps it:
+
+```sh
+# on any host that can reach the lab manager API (default user: wazuh)
+SBOB_WAZUH_API_PASS=… node scripts/logtest-api.ts --target php --api https://<lab-manager>:55000
+```
+
+- **benign gate**: zero alerts across the corpus (level-0 base-chain matches are fine; k8s attribution info rules are exempt for the redis targets).
+- **drift gate**: every mapped rule id (100111 / 100121 / 100131 / 100163) asserted from the JSON response, not from grep.
+- **sustained gate**: replays the drift corpus **eight times inside ONE logtest session** so `firedtimes` accumulates like the live engine and the frequency children **100112 / 100122 / 100132** fire — the sustained-drift leg of the scenario a one-shot replay cannot demonstrate.
+
+The response schema is parsed defensively (rule id from `data.rule.id`, the alert object, or the phase-3 text output), so minor API shape drift between 4.x minors does not break the harness. The transport is injectable; `test/logtest-api.test.ts` runs the full logic against mocked responses, so only the live lab run is unverified.
+
 ## Known caveats (same as the redis bundle)
 
+- **Wazuh 5.0 changes the testing surface**: the `wazuh-logtest` binary is removed in 5.0 and detection content (rules, decoders, KVDB replacing CDB lists) moves to a Draft→Test→Custom lifecycle managed by the indexer Content Manager, with log testing driven through its REST API. The API harness targets 4.x; a 5.x bundle migration (CDB→KVDB, promotion via the content manager) is a separate M-lane work item.
 - The connect leg (100131) depends on the saddr decoder work item (TDS 7.3.1): the decoder currently extracts raw `sbob.saddr`; the `sbob.dst_ip`/`sbob.dst_port` fields the rule consumes land with that item. The corpus already carries the AF_INET hex (`0200 115C 2D9B940C` = 45.155.148.12:4444) so the leg is replay-ready.
 - Signature rules are node-scoped (Mode B): declare `rulePolicies.processAllowed` exemptions for node daemons (kubelet, containerd) before a node-wide rollout, or expect benign signature noise.
 - Ingress on Linux is informational (TDS 8 accept-attribution gap); the NetworkPolicy enforces the declared nginx peer set regardless.
