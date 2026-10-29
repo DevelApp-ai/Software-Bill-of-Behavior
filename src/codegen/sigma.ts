@@ -62,7 +62,6 @@ function sigmaRule(ir: IR, section: string, doc: {
     `  - ${doc.falsepositives}`,
     `level: ${doc.level}`,
     `tags:`,
-    `  - sbob`,
     `  - sbob.${name}`,
     `  - sbob.drift`,
     `  - sbob.${section}`,

@@ -106,6 +106,23 @@ test("sigma titles are quoted scalars — unquoted \": \" breaks strict YAML (py
   }
 });
 
+// --- Sigma tags must be namespaced ("ns.tag") — pySigma rejects bare tags ---
+
+test("sigma tags are dot-namespaced — bare tags break pySigma (SigmaValueError)", () => {
+  const files = generateSigmaBundle(redisIR()).filter((f) => f.path.endsWith(".yml"));
+  for (const f of files) {
+    const block = /^tags:\n((?:  - .+\n)+)/m.exec(f.content)![1]!;
+    const tags = block.split("\n").filter(Boolean).map((l) => l.slice(4));
+    assert.ok(tags.length > 0, `${f.path} must emit tags`);
+    for (const t of tags) {
+      assert.ok(
+        /^[A-Za-z0-9_-]+\..+/.test(t),
+        `tag "${t}" of ${f.path} must be "namespace.tag" — pySigma rejects bare tags`,
+      );
+    }
+  }
+});
+
 // --- Velociraptor ------------------------------------------------------------
 
 test("velociraptor artifact: pslist/netstat sweeps with RE2-safe anchored PCRE", () => {

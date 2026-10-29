@@ -102,21 +102,60 @@ jobs:
           set -o pipefail
           python -m pip install --disable-pip-version-check "sigma-cli==$LOGPOINT_SIGMA_CLI_VERSION" "pysigma-backend-logpoint==$PYSIGMA_LOGPOINT_VERSION" 2>&1 | tee /tmp/lane.log
           python -m pip list 2>/dev/null | grep -iE "sigma|pysigma" | tee -a /tmp/lane.log
+          # pysigma-backend-logpoint 1.0.2 ships no entry_points.txt in its wheel
+          # (upstream packaging bug), so `sigma convert -t logpoint` cannot discover
+          # the backend via plugin autodiscovery. Import LogPoint's backend and
+          # pipelines directly instead — same code path sigma-cli would drive.
+          python - <<'PYEOF' 2>&1 | tee -a /tmp/lane.log
+          import glob, sys
+          from sigma.backends.logpoint import Logpoint
+          from sigma.pipelines.logpoint import logpoint_linux_pipeline
+          from sigma.collection import SigmaCollection
+
+          backend = Logpoint(logpoint_linux_pipeline())
+          queries = []
+          for path in sorted(glob.glob("dist/bundle-sigma/sigma/sbob/*_linux.yml")):
+              with open(path, encoding="utf-8") as f:
+                  rules = SigmaCollection.from_yaml(f.read())
+              out = backend.convert(rules)
+              print(f"== {path}")
+              for q in out:
+                  print(q)
+              queries.extend(out)
+          if not queries:
+              sys.exit("FAIL: no LQL queries produced")
+          joined = "\n".join(queries)
           # LogPoint's own auditd taxonomy: type→event_type, exe/name→path
-          sigma convert -t logpoint -p logpoint_linux dist/bundle-sigma/sigma/sbob/*_linux.yml \
-            | tee /tmp/convert-linux.lql | tee -a /tmp/lane.log
-          test -s /tmp/convert-linux.lql
-          grep -q SYSCALL /tmp/convert-linux.lql
-          grep -q path /tmp/convert-linux.lql
-          echo "logpoint linux conversion OK" | tee -a /tmp/lane.log
+          if "SYSCALL" not in joined or "path" not in joined:
+              sys.exit("FAIL: expected auditd-plane fields (SYSCALL, path) missing from LQL")
+          print("logpoint linux conversion OK")
+          PYEOF
       - name: Convert the Sysmon-plane rules through logpoint_windows
         shell: bash
         run: |
           set -o pipefail
-          sigma convert -t logpoint -p logpoint_windows dist/bundle-sigma/sigma/sbob/*_windows.yml \
-            | tee /tmp/convert-windows.lql | tee -a /tmp/lane.log
-          test -s /tmp/convert-windows.lql
-          echo "logpoint windows conversion OK" | tee -a /tmp/lane.log
+          python - <<'PYEOF' 2>&1 | tee -a /tmp/lane.log
+          import glob, sys
+          from sigma.backends.logpoint import Logpoint
+          from sigma.pipelines.logpoint import logpoint_windows_pipeline
+          from sigma.collection import SigmaCollection
+
+          backend = Logpoint(logpoint_windows_pipeline())
+          queries = []
+          for path in sorted(glob.glob("dist/bundle-sigma/sigma/sbob/*_windows.yml")):
+              with open(path, encoding="utf-8") as f:
+                  rules = SigmaCollection.from_yaml(f.read())
+              out = backend.convert(rules)
+              print(f"== {path}")
+              for q in out:
+                  print(q)
+              queries.extend(out)
+          if not queries:
+              sys.exit("FAIL: no LQL queries produced")
+          if "event_id" not in "\n".join(queries):
+              sys.exit("FAIL: expected Sysmon event_id mapping missing from LQL")
+          print("logpoint windows conversion OK")
+          PYEOF
       - name: Post lane diagnostics to the PR (failure path)
         if: failure()
         env:
