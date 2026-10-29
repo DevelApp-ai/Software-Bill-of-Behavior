@@ -4,7 +4,7 @@
  * Usage:
  *   node src/cli.ts transpile --sbob <file.yaml> [--sbob <file2.yaml>]
  *         [--registry docs/sbob-registry.yaml] [--out dist/bundle]
- *         [--target linux|windows|k8s-node|sigma|velociraptor|mde|falco]
+ *         [--target linux|windows|k8s-node|sigma|velociraptor|mde|falco|logpoint]
  *         [--skip-signature-verify] [--confirm-none execs,opens]
  *   node src/cli.ts validate --sbob <file.yaml> [--confirm-none execs,opens]
  *   node src/cli.ts diff --old <a.yaml> --new <b.yaml>
@@ -48,7 +48,7 @@ options:
   --registry <path>             workload slot registry (default docs/sbob-registry.yaml)
   --out <dir>                   bundle output directory (default dist/bundle)
   --target <name>               codegen target: linux (M1), windows (M2), k8s-node (M3),
-                                 sigma / velociraptor / mde / falco (M6, TDS 13)
+                                 sigma / velociraptor / mde / falco / logpoint (M6, TDS 13)
   --skip-signature-verify       skip SBoB signature verification (development profiles only)
   --confirm-none <section,...>  accept explicitly-empty (NONE) sections
   --lab-validation <path>       (transpile) lab-validation evidence file
@@ -210,7 +210,7 @@ async function main(): Promise<void> {
   try {
     if (args.command === "transpile") {
       if (args.sbob.length === 0) usage();
-      const KNOWN_TARGETS = ["linux", "windows", "k8s-node", "sigma", "velociraptor", "mde", "falco"] as const;
+      const KNOWN_TARGETS = ["linux", "windows", "k8s-node", "sigma", "velociraptor", "mde", "falco", "logpoint"] as const;
       if (!(KNOWN_TARGETS as readonly string[]).includes(args.target)) {
         console.error(`target "${args.target}" is not available (targets: ${KNOWN_TARGETS.join(", ")})`);
         exit(2);
@@ -218,7 +218,7 @@ async function main(): Promise<void> {
       const result = await transpile(args.sbob, {
         registryPath: args.registry,
         outDir: args.out,
-        target: args.target as "linux" | "windows" | "k8s-node" | "sigma" | "velociraptor" | "mde" | "falco",
+        target: args.target as "linux" | "windows" | "k8s-node" | "sigma" | "velociraptor" | "mde" | "falco" | "logpoint",
         skipSignatureVerify: args.skipSignatureVerify,
         confirmNone: args.confirmNone,
         labValidationPath: args.labValidation || undefined,

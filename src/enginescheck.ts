@@ -3,7 +3,8 @@
  *
  * Asserts that docs/engine-matrix.md accounts for every attack in the
  * upstream kill-chain suite (docs/upstream-redis-attacks.yaml) across the
- * phase-2 engines (sigma-win, sigma-linux, mde, falco, velociraptor):
+ * phase-2 engines (sigma-win, sigma-linux, mde, falco, velociraptor,
+ * logpoint):
  *   - every suite attack has a row (same paper-trail contract as
  *     src/attackcheck.ts, TDS 11.3);
  *   - every cell status is one of detect / partial / blind / n-a;
@@ -23,7 +24,7 @@ export interface EngineRow {
   notes: string;
 }
 
-/** Rows of the engine matrix table: | # | attack | sigma-win | sigma-linux | mde | falco | velociraptor | notes | */
+/** Rows of the engine matrix table: | # | attack | sigma-win | sigma-linux | mde | falco | velociraptor | logpoint | notes | */
 export function parseEngineRows(markdownSource: string, engineCount: number): Map<string, EngineRow> {
   const rows = new Map<string, EngineRow>();
   for (const line of markdownSource.split("\n")) {

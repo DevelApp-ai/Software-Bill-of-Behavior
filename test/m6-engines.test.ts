@@ -214,21 +214,21 @@ test("envoy: coverage matrix marks endpoints partial [ENVOY_L7] on k8s only", ()
 
 // --- Engine blind-spot matrix gates ------------------------------------------
 
-test("engine matrix: committed doc accounts for all 62 suite attacks across 5 engines", () => {
+test("engine matrix: committed doc accounts for all 62 suite attacks across 6 engines", () => {
   const suite = readFileSync(SUITE, "utf8");
   const engineMd = readFileSync(ENGINE_MATRIX, "utf8");
   const attackRows = parseMatrixRows(readFileSync(ATTACK_MATRIX, "utf8"));
-  const result = runEngineMatrixCheck(suite, engineMd, attackRows, 5);
+  const result = runEngineMatrixCheck(suite, engineMd, attackRows, 6);
   assert.deepEqual(result.problems, []);
   assert.equal(result.attackCount, 62);
   assert.equal(result.rowCount, 62);
 });
 
 test("engine matrix: statuses restricted to detect/partial/blind/n-a", () => {
-  const rows = parseEngineRows(readFileSync(ENGINE_MATRIX, "utf8"), 5);
+  const rows = parseEngineRows(readFileSync(ENGINE_MATRIX, "utf8"), 6);
   assert.equal(rows.size, 62);
   for (const row of rows.values()) {
-    assert.equal(row.statuses.length, 5);
+    assert.equal(row.statuses.length, 6);
     for (const s of row.statuses) assert.ok((ENGINE_STATUS as readonly string[]).includes(s), `bad status "${s}" in #${row.num}`);
   }
 });
@@ -240,21 +240,21 @@ test("engine matrix gate: detects missing rows, bad statuses and undocumented al
 
   // 1. missing row
   const missing = engineMd.replace(/^\| 55 \|.*$/m, "");
-  const r1 = runEngineMatrixCheck(suite, missing, attackRows, 5);
+  const r1 = runEngineMatrixCheck(suite, missing, attackRows, 6);
   assert.ok(r1.problems.some((p) => p.includes("recon-redis-cli-bigkeys")));
 
   // 2. invalid status token
   const bad = engineMd.replace(/^\| 55 \|(.*)\| detect \|(.*)$/m, (_m, a, b) => `| 55 |${a}| maybe |${b}`);
-  const r2 = runEngineMatrixCheck(suite, bad, attackRows, 5);
+  const r2 = runEngineMatrixCheck(suite, bad, attackRows, 6);
   assert.ok(r2.problems.some((p) => p.includes('status "maybe"')));
 
   // 3. all-blind without a documented class (EXEC row → blind everywhere)
   const blinded = engineMd.replace(/^\| 55 \|(.*)$/m, (_m, rest) => `| 55 |${rest.replace(/detect/g, "blind")}`);
-  const r3 = runEngineMatrixCheck(suite, blinded, attackRows, 5);
+  const r3 = runEngineMatrixCheck(suite, blinded, attackRows, 6);
   assert.ok(r3.problems.some((p) => p.includes("no engine detects")), "EXEC row blinded everywhere must fail");
 
   // 4. documented-class row (FILELESS-EXE) may stay blind everywhere
   const l7 = engineMd.replace(/^\| 7 \|(.*)$/m, (_m, rest) => `| 7 |${rest.replace(/detect/g, "blind")}`);
-  const r4 = runEngineMatrixCheck(suite, l7, attackRows, 5);
+  const r4 = runEngineMatrixCheck(suite, l7, attackRows, 6);
   assert.ok(!r4.problems.some((p) => p.includes("lua-fileless-memfd")), "documented-class blind must not fail the gate");
 });
