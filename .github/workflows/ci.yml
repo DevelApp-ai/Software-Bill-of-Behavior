@@ -15,9 +15,9 @@ jobs:
           node-version: 22
       - name: Unit + golden tests (zero-dependency, no install)
         run: node --test test/*.test.ts
-      - name: Codegen determinism gate — twice-run byte diff, all 7 targets (TDS 11.4, M4/M6)
+      - name: Codegen determinism gate — twice-run byte diff, all 8 targets (TDS 11.4, M4/M6)
         run: |
-          for target in linux windows k8s-node sigma velociraptor mde falco; do
+          for target in linux windows k8s-node sigma velociraptor mde falco logpoint; do
             rm -rf /tmp/run1 /tmp/run2
             node src/cli.ts transpile --sbob sbobs/redis.yaml --out /tmp/run1 --target "$target" --skip-signature-verify
             node src/cli.ts transpile --sbob sbobs/redis.yaml --out /tmp/run2 --target "$target" --skip-signature-verify
