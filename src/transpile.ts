@@ -17,12 +17,13 @@ import { generateSigmaBundle } from "./codegen/sigma.ts";
 import { generateVelociraptorBundle } from "./codegen/velociraptor.ts";
 import { generateMdeBundle } from "./codegen/mde.ts";
 import { generateFalcoBundle } from "./codegen/falco.ts";
+import { generateLogPointBundle } from "./codegen/logpoint.ts";
 import type { IR } from "./types.ts";
 
 export interface TranspileOptions {
   registryPath: string;
   outDir: string;
-  target: "linux" | "windows" | "k8s-node" | "sigma" | "velociraptor" | "mde" | "falco";
+  target: "linux" | "windows" | "k8s-node" | "sigma" | "velociraptor" | "mde" | "falco" | "logpoint";
   skipSignatureVerify: boolean;
   confirmNone: string[];
   /** Lab-validation evidence file (docs/lab-validation.yaml); stamps validated bundles. */
@@ -96,7 +97,9 @@ export async function transpile(sbobPaths: string[], opts: TranspileOptions): Pr
                 ? generateVelociraptorBundle(ir)
                 : opts.target === "mde"
                   ? generateMdeBundle(ir)
-                  : generateFalcoBundle(ir, alloc);
+                  : opts.target === "logpoint"
+                    ? generateLogPointBundle(ir)
+                    : generateFalcoBundle(ir, alloc);
     for (const f of files) allFiles.push(f);
     workloads.push({ name: ir.workload.name, slot, files: files.map((f) => f.path) });
   }

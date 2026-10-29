@@ -3,7 +3,7 @@
  *
  * Reads docs/attack-matrix.md (wazuh detection + coverage class per attack)
  * and emits the per-engine blind-spot matrix for the phase-2 codegen
- * targets (sigma-win, sigma-linux, mde, falco, velociraptor). Engine cells
+ * targets (sigma-win, sigma-linux, mde, falco, velociraptor, logpoint). Engine cells
  * mirror the wazuh semantics: a row wazuh detects through the exec/open/
  * connect components (100011/100021/100031) is visible to the engines that
  * implement the same component; rows with no component stay blind unless
@@ -28,7 +28,7 @@ function components(detection: string): { exec: boolean; open: boolean; connect:
   };
 }
 
-function cellFor(cls: string, detection: string): { sl: string; mde: string; falco: string; vel: string; note: string } {
+function cellFor(cls: string, detection: string): { sl: string; mde: string; falco: string; vel: string; lp: string; note: string } {
   const c = components(detection);
   const fileless = cls.includes("FILELESS-EXE");
   const any = c.exec || c.open || c.connect || fileless;
@@ -39,6 +39,7 @@ function cellFor(cls: string, detection: string): { sl: string; mde: string; fal
       mde: "blind",
       falco: "blind",
       vel: "blind",
+      lp: "blind",
       note: "in-process app-plane activity — documented blind (BLIND-L7, TDS 13)",
     };
   }
@@ -55,11 +56,19 @@ function cellFor(cls: string, detection: string): { sl: string; mde: string; fal
   if (c.exec || c.connect || fileless) mde = "detect";
   else if (c.open) mde = "partial";
 
+  // logpoint: v1 consumes the same auditd plane as sigma-linux — exec/open
+  // rules match the normalized path field; connect rules ride raw
+  // daddr/dport fields LogPoint's auditd taxonomy does not normalize.
+  let lp = "blind";
+  if (c.exec || c.open || fileless) lp = "detect";
+  else if (c.connect) lp = "partial";
+
   return {
     sl: "detect",
     mde,
     falco: "detect",
     vel,
+    lp,
     note: "",
   };
 }
@@ -86,7 +95,7 @@ const perRowNotes: Record<number, string> = {
 const defaultNotes: Record<string, string> = {
   EXEC: "execve off-allowlist (100011 semantics)",
   OPEN: "open/openat (100021 semantics); MDE file-create only, no velociraptor v1 sweep",
-  CONNECT: "connect off-allowlist (100031 semantics); velociraptor netstat sweep sees established state only",
+  CONNECT: "connect off-allowlist (100031 semantics); velociraptor netstat sweep sees established state only; logpoint matches raw auditd daddr/dport (taxonomy-unnormalized) — partial",
 };
 
 function noteFor(cls: string, detection: string): string {
@@ -105,7 +114,7 @@ lines.push(
   "Per-engine coverage of the upstream kill-chain suite " +
     "(docs/upstream-redis-attacks.yaml) by the phase-2 codegen targets " +
     "(M6, issue #7): sigma-windows, sigma-linux, Microsoft Defender for " +
-    "Endpoint (MDE) KQL, Falco and Velociraptor artifacts.",
+    "Endpoint (MDE) KQL, Falco, Velociraptor and LogPoint artifacts.",
 );
 lines.push("");
 lines.push(
@@ -126,14 +135,14 @@ lines.push("- `n-a` — the engine plane does not apply (the sigma-windows pack 
 lines.push("");
 lines.push("Cells describe the shipped M6 artifact set, not what an engine could theoretically do with hand-written content.");
 lines.push("");
-lines.push("| # | attack | sigma-win | sigma-linux | mde | falco | velociraptor | notes |");
-lines.push("|---|--------|----------|-------------|-----|-------|--------------|-------|");
+lines.push("| # | attack | sigma-win | sigma-linux | mde | falco | velociraptor | logpoint | notes |");
+lines.push("|---|--------|----------|-------------|-----|-------|--------------|----------|-------|");
 
 for (const [name, row] of matrix) {
   const cell = cellFor(row.coverageClass, row.detection);
   const note = perRowNotes[row.num] ?? (cell.note || noteFor(row.coverageClass, row.detection));
   lines.push(
-    "| " + row.num + " | " + name + " | n-a | " + cell.sl + " | " + cell.mde + " | " + cell.falco + " | " + cell.vel + " | " + note + " |",
+    "| " + row.num + " | " + name + " | n-a | " + cell.sl + " | " + cell.mde + " | " + cell.falco + " | " + cell.vel + " | " + cell.lp + " | " + note + " |",
   );
 }
 
