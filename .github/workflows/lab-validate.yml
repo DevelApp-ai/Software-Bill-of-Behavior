@@ -1,0 +1,131 @@
+name: SBoB lab validation (containerized Wazuh manager)
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # nightly (UTC) — all four targets, disposable manager
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, labeled]
+
+permissions:
+  contents: read
+
+env:
+  # The disposable "lab manager" of this workflow is a pinned container:
+  # Wazuh >= 4.4 keeps BOTH testing surfaces — the wazuh-logtest binary and
+  # the PUT /logtest API. 5.x removes the binary (see docs/php2shell-scenario.md),
+  # so stay on 4.x until the 5.x KVDB content-manager lane lands.
+  WAZUH_IMAGE: wazuh/wazuh-manager:4.14.6
+  WAZUH_CONTAINER: sbob-wazuh-manager
+  WAZUH_API: https://localhost:55000
+  # Fresh-image API credentials (documented defaults of a clean wazuh-manager;
+  # throwaway container recreated per run — nothing to protect).
+  WAZUH_API_USER: wazuh
+  WAZUH_API_PASS: wazuh
+
+jobs:
+  lab-validate:
+    name: lab-validate (${{ matrix.target }})
+    # nightly + dispatch always; on PRs only when explicitly labeled
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'lab-validate')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # corpus target → SBoB to transpile + sbobctl --target
+        include:
+          - target: linux
+            sbob: sbobs/redis.yaml
+            transpile-target: linux
+          - target: windows
+            sbob: sbobs/redis.yaml
+            transpile-target: windows
+          - target: k8s
+            sbob: sbobs/redis.yaml
+            transpile-target: k8s-node
+          - target: php
+            sbob: sbobs/php-fpm.yaml
+            transpile-target: linux
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Start the disposable Wazuh manager (${{ env.WAZUH_IMAGE }})
+        run: |
+          docker pull "$WAZUH_IMAGE"
+          docker run -d --name "$WAZUH_CONTAINER" \
+            -p 1514:1514 -p 1515:1515 -p 55000:55000 \
+            "$WAZUH_IMAGE"
+          for i in $(seq 1 36); do
+            code=$(curl -sk -o /dev/null -w '%{http_code}' "$WAZUH_API" || true)
+            if [ "$code" = "200" ]; then echo "manager API up (HTTP $code)"; exit 0; fi
+            sleep 5
+          done
+          echo "manager API did not come up"
+          docker logs --tail 80 "$WAZUH_CONTAINER" || true
+          exit 1
+
+      - name: Transpile the bundle (sbob ${{ matrix.sbob }}, --target ${{ matrix.transpile-target }})
+        run: |
+          node src/cli.ts transpile --sbob ${{ matrix.sbob }} --out dist/bundle \
+            --target ${{ matrix.transpile-target }} \
+            --registry docs/sbob-registry.yaml --skip-signature-verify
+
+      - name: Install the bundle + declare the CDB lists in ossec.conf
+        run: |
+          # 1. stage into the manager layout — the exact lab mapping of
+          #    scripts/sync-manager.sh (rules/decoders flattened, CDB lists path-preserved)
+          scripts/sync-manager.sh dist/bundle --root staging
+          find staging/rules staging/decoders staging/lists -type f | sort
+
+          # 2. copy into the container's /var/ossec/etc/{rules,decoders,lists}
+          docker cp staging/rules/.    "$WAZUH_CONTAINER:/var/ossec/etc/rules/"
+          docker cp staging/decoders/. "$WAZUH_CONTAINER:/var/ossec/etc/decoders/"
+          docker cp staging/lists/.    "$WAZUH_CONTAINER:/var/ossec/etc/lists/"
+
+          # 3. CDB lists are NOT auto-loaded by Wazuh: every generated sbob list
+          #    must be declared in the ossec.conf <ruleset> block
+          docker cp "$WAZUH_CONTAINER:/var/ossec/etc/ossec.conf" ossec.conf
+          (cd staging/lists && find sbob -type f | sort) | while read -r rel; do
+            printf '    <list>etc/lists/%s</list>\n' "$rel"
+          done > sbob-lists.snippet
+          awk '
+            BEGIN { while ((getline l < "sbob-lists.snippet") > 0) ins = ins l ORS }
+            !done && /<\/ruleset>/ { printf "%s", ins; done = 1 }
+            { print }
+          ' ossec.conf > ossec.conf.new
+          mv ossec.conf.new ossec.conf
+          echo "declared lists:" && grep "<list>etc/lists/sbob" ossec.conf
+          docker cp ossec.conf "$WAZUH_CONTAINER:/var/ossec/etc/ossec.conf"
+
+      - name: Restart the manager and wait for the API (bundle must load cleanly)
+        run: |
+          docker exec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control restart
+          for i in $(seq 1 36); do
+            code=$(curl -sk -o /dev/null -w '%{http_code}' "$WAZUH_API" || true)
+            if [ "$code" = "200" ]; then echo "manager API up after restart"; exit 0; fi
+            sleep 5
+          done
+          echo "manager API did not come back after the bundle install"
+          docker exec "$WAZUH_CONTAINER" sh -c "grep -iE 'error|invalid|warn' /var/ossec/logs/ossec.log | tail -25" || true
+          docker logs --tail 80 "$WAZUH_CONTAINER" || true
+          exit 1
+
+      - name: Corpus gate (wazuh-logtest — benign corpus silent, drift corpus fires)
+        run: |
+          # wazuh-logtest reads the manager's live ruleset, so the corpus replay
+          # runs INSIDE the container; script + corpora ride along with it
+          docker cp test "$WAZUH_CONTAINER:/test"
+          docker cp scripts "$WAZUH_CONTAINER:/sbob-scripts"
+          docker exec -e SBOB_TARGET="${{ matrix.target }}" "$WAZUH_CONTAINER" \
+            bash -c 'PATH="/var/ossec/bin:$PATH" bash /sbob-scripts/logtest-corpus.sh "$SBOB_TARGET"'
+
+      - name: API detection gate (logtest API — JSON-asserted ids + sustained frequency children)
+        run: |
+          SBOB_WAZUH_API_USER="$WAZUH_API_USER" SBOB_WAZUH_API_PASS="$WAZUH_API_PASS" \
+            node scripts/logtest-api.ts --target "${{ matrix.target }}" --api "$WAZUH_API"
