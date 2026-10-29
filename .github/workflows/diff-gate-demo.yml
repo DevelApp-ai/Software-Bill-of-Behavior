@@ -1,0 +1,62 @@
+name: SBoB diff-gate action demo
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # (a) fixture-verify — the minimal consuming workflow (issue #22): proves the
+  # wrapper's contract on the committed fixture pair on every PR, and stays
+  # green: the expected mandatory failure is asserted with continue-on-error,
+  # never left as a red check on ordinary PRs.
+  fixture-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 'Clean gate (base vs base) must pass'
+        uses: ./
+        with:
+          old: test/diffgate-fixtures/base.yaml
+          new: test/diffgate-fixtures/base.yaml
+          report-name: sbob-diff-gate-clean
+
+      - name: 'Drifted gate (base vs drifted) must fail with the mandatory verdict'
+        id: drift
+        uses: ./
+        continue-on-error: true
+        with:
+          old: test/diffgate-fixtures/base.yaml
+          new: test/diffgate-fixtures/drifted.yaml
+          report-name: sbob-diff-gate-drifted
+
+      - name: 'Assert the mandatory-failure contract'
+        if: ${{ always() }}
+        run: |
+          test "${{ steps.drift.outcome }}" = "failure"
+          test "${{ steps.drift.outputs.verdict }}" = "mandatory"
+          test "${{ steps.drift.outputs.exit-code }}" = "1"
+          echo "diff-gate action contract OK: drifted fixture pair fails MANDATORY with exit 1; clean pair stays green"
+
+  # (b) promotion-gate — the real promotion flow demo (issue #22 exit
+  # criteria): runs only on demo/promotion-* branches, where the red
+  # mandatory check on the drifted fixture pair is the acceptance evidence.
+  # Attaches the delta report (markdown + JSON artifact) to the demo PR.
+  promotion-gate:
+    if: ${{ startsWith(github.head_ref, 'demo/promotion-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 'SBoB promotion gate (expected to FAIL: mandatory verdict on the drifted fixture pair)'
+        uses: ./
+        with:
+          old: test/diffgate-fixtures/base.yaml
+          new: test/diffgate-fixtures/drifted.yaml
+          github-token: ${{ github.token }}

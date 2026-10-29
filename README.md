@@ -95,6 +95,41 @@ node src/cli.ts profile --events windows/legacy-cache.jsonl --workload legacy-ca
 Workload rule IDs are derived deterministically from the slot registry (`docs/sbob-registry.yaml`):
 `rule_id = 100000 + slot*100 + section_code*10 + variant` — see [TDS §6.1](docs/TDS.md).
 
+## Promotion gate (reusable GitHub Action)
+
+The repo ships a composite action wrapping `sbobctl diff` — the M8 release gate in CI form ([#22](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/22)):
+
+```yaml
+jobs:
+  sbob-promotion-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # attaches the delta report to the triggering PR
+    steps:
+      - uses: actions/checkout@v5
+      - uses: DevelApp-ai/Software-Bill-of-Behavior@main   # pin to a tag/SHA in real use
+        with:
+          old: releases/webcache-1.2.yaml   # prior-release SBoB (workspace-relative path)
+          new: releases/webcache-1.3.yaml   # next-release SBoB
+          fail-on: mandatory                # none | advisory | mandatory (default)
+          # namespace: /usr/bin,/app        # optional exec-scoring overrides (comma/newline-separated)
+          # internal-suffix: corp.internal   # optional extra internal DNS suffixes
+          github-token: ${{ github.token }} # optional: comment the delta on the triggering PR
+```
+
+Behavior — deterministic and zero-dependency (Node 22 type stripping, no `npm install`):
+
+- runs `sbobctl diff --old … --new … --fail-on …`, writes `<report-name>.json` (machine-readable delta report) and `<report-name>.delta.md` (verdict markdown), and uploads both as a workflow artifact (always, PR-triggered or not);
+- when `github-token` is set and the event is a pull request, attaches the `*.delta.md` verdict to the triggering PR as a comment;
+- writes a step summary mirroring the verdict line (verdict, Δ score, fail-on threshold);
+- propagates the `sbobctl diff` exit code from `--fail-on` (verdict at/above the threshold ⇒ exit 1), so the gate is green exactly when the release delta is below the threshold;
+- a diff that cannot run (invalid SBoB, workload name mismatch) is an `error` verdict and fails the gate — never green on a broken diff.
+
+Outputs: `verdict` (`clean|advisory|mandatory|error`), `score` (Δ), `exit-code`.
+
+This repo consumes its own action on the committed fixture pair in [`.github/workflows/diff-gate-demo.yml`](.github/workflows/diff-gate-demo.yml): the **fixture-verify** job asserts the contract on every PR (clean pair passes; drifted pair fails MANDATORY with exit 1, asserted via `continue-on-error` so ordinary PRs stay green), and a `demo/promotion-*` branch gets the real red **promotion-gate** check with both reports attached — the #22 exit-criteria demo promotion PR.
+
 ## The derivation loop (M9)
 
 Most real-world workloads ship no vendor SBoB. The profiler is the on-ramp for them: it consumes a window of **normalized `sbob.*` events** (the same field contract the drift decoders emit — JSONL), clusters them per workload × section, classifies every entry **steady · periodic · sporadic · one-off** (calibratable thresholds), applies the mandatory disposition taxonomy (**declare · hold · exempt-with-expiry · investigate** — no "no decision" states), and emits a candidate SBoB plus a provenance sidecar for human review. Kernel/runtime telemetry (`auditd`, `sysmon`, `ebpf`) is the only confirming source — entries seen only by flow logs or app logs are marked unverified and excluded. Workloads with open incident labels are quarantined: no candidate until remediated. A reviewer who overrides a held or investigated entry to `declare` must write the reason, or the run fails — **no unexplained observation becomes a plain allow.** With `--baseline`, the candidate's first reviewed delta scores through the M8 diff gate. See [TDS §17](docs/TDS.md).
