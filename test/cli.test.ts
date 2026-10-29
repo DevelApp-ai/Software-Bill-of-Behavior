@@ -19,6 +19,14 @@ const CLI = join(ROOT, "src", "cli.ts");
 const REDIS = join(ROOT, "sbobs", "redis.yaml");
 const REGISTRY = join(ROOT, "docs", "sbob-registry.yaml");
 
+/** Next slot the committed registry will allocate (max slot + 1, TDS 6.1) —
+ *  derived instead of hardcoded so registry evolution (new committed
+ *  workloads) does not break this contract. */
+function nextSlot(): number {
+  const slots = [...readFileSync(REGISTRY, "utf8").matchAll(/\{slot: (\d+)\}/g)].map((m) => Number(m[1]));
+  return Math.max(...slots, -1) + 1;
+}
+
 interface RunResult {
   status: number | null;
   stdout: string;
@@ -181,17 +189,18 @@ test("transpile allocates the next slot for a new workload and prints the evolve
       "--target", "linux", "--skip-signature-verify",
     ]);
     assert.equal(r.status, 0);
+    const slot = nextSlot();
     assert.match(r.stdout, /workload redis \(slot 0\)/);
-    assert.match(r.stdout, /workload web \(slot 1\)/);
+    assert.match(r.stdout, new RegExp(`workload web \\(slot ${slot}\\)`));
     assert.match(r.stdout, /registry updated/);
-    // slot 1 lands in the 100100 band, not the redis band (TDS 6.1)
+    // the new slot lands in its own 100xxx band, not the redis band (TDS 6.1)
     assert.ok(existsSync(join(out, "redis.manifest.json")));
     assert.ok(existsSync(join(out, "web.manifest.json")));
-    assert.ok(existsSync(join(out, "wazuh", "rules", "sbob", "100100_web_linux.xml")));
+    assert.ok(existsSync(join(out, "wazuh", "rules", "sbob", `${100000 + slot * 100}_web_linux.xml`)));
     // the GitOps contract: the committed registry file is never mutated in place —
     // the evolved registry is printed for the operator to review and commit
     assert.equal(readFileSync(reg, "utf8"), readFileSync(REGISTRY, "utf8"));
-    assert.match(r.stdout, /web: \{slot: 1\}/);
+    assert.match(r.stdout, new RegExp(`web: \\{slot: ${slot}\\}`));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
