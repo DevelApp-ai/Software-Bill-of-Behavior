@@ -42,7 +42,10 @@ function sigmaRule(ir: IR, section: string, doc: {
 }): BundleFile {
   const name = ir.workload.name;
   const lines: string[] = [
-    `title: ${doc.title}`,
+    // title is double-quoted: rule titles contain ": " (SBoB drift: ...) which
+    // breaks strict YAML parsers as an unquoted scalar (pySigma/SigmaHQ issue,
+    // caught by the engines-lab sigma lane)
+    `title: ${yamlQuote(doc.title)}`,
     `id: ${uuid5(`${name}:${section}`)}`,
     `status: experimental`,
     `description: |`,
@@ -59,7 +62,6 @@ function sigmaRule(ir: IR, section: string, doc: {
     `  - ${doc.falsepositives}`,
     `level: ${doc.level}`,
     `tags:`,
-    `  - sbob`,
     `  - sbob.${name}`,
     `  - sbob.drift`,
     `  - sbob.${section}`,
