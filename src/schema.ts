@@ -31,21 +31,29 @@ function stringList(v: YamlValue, path: string): string[] {
 
 /**
  * Package purls accepted in spec.imageID for package-bound profiles
- * (imageID extension, docs/TDS.md §2.1): `pkg:nuget/<name>@<version>` and
- * `pkg:choco/<name>@<version>` (`choco` is a DevelApp extension type).
- * Version-pinned by contract — an unpinned purl is not a stable binding.
+ * (imageID extension, docs/TDS.md §2.1). Version-pinned by contract — an
+ * unpinned purl is not a stable binding. The ecosystem set is the one the
+ * DevelApp SBOB-Forge generator emits across its extraction matrix (M6
+ * replay lane): nuget, choco (a DevelApp extension type), generic, golang,
+ * maven, npm, composer, pypi. Multi-segment namespace/name paths are
+ * allowed per the purl spec (e.g. pkg:maven/com.example/example-core@1.0.0,
+ * pkg:golang/example.com/go-core@1.0.0) and npm scoped names may start the
+ * path with '@' (pkg:npm/@scope/name@1.0.0).
  * Such profiles must carry the annotation `develapp.io/binding: package-purl`
  * so plain-image profiles are unaffected. Anything not starting with `pkg:`
  * is treated as an OCI image reference (unchanged behavior).
  */
-const PACKAGE_PURL = /^pkg:(nuget|choco)\/([A-Za-z0-9][A-Za-z0-9._-]*)@([A-Za-z0-9][A-Za-z0-9._+-]*)$/;
+export const PACKAGE_PURL_TYPES = ["nuget", "choco", "generic", "golang", "maven", "npm", "composer", "pypi"] as const;
+const PACKAGE_PURL = new RegExp(
+  "^pkg:(" + PACKAGE_PURL_TYPES.join("|") + ")/([A-Za-z0-9@][A-Za-z0-9._@/-]*)@([A-Za-z0-9][A-Za-z0-9._+-]*)$",
+);
 
 function validateImageID(imageID: string, annotations: Record<string, string> | undefined): void {
   if (!imageID.startsWith("pkg:")) return; // OCI image reference: unchanged
   if (!PACKAGE_PURL.test(imageID)) {
     fail(
       "spec.imageID",
-      `"${imageID}" is not a version-pinned package purl of the form pkg:nuget/<name>@<version> or pkg:choco/<name>@<version>`,
+      `"${imageID}" is not a version-pinned package purl of a supported ecosystem (${PACKAGE_PURL_TYPES.join(", ")})`,
     );
   }
   if (annotations?.["develapp.io/binding"] !== "package-purl") {
