@@ -35,7 +35,9 @@ Build a transpiler that consumes signed SBoB profiles and emits a deployable Waz
 
 ### 2.1 The SBoB source model (v0.0.4)
 
-A signed, declarative YAML profile bound to one container image (`spec.imageID`, ideally digest-pinned). Behavioral sections under `spec`:
+A signed, declarative YAML profile bound to one container image (`spec.imageID`, ideally digest-pinned).
+
+**imageID extension (package purls, issue #33):** `spec.imageID` also accepts version-pinned package purls of the form `pkg:nuget/<name>@<version>` and `pkg:choco/<name>@<version>` (`choco` is a DevelApp extension type). Profiles bound this way MUST carry the annotation `develapp.io/binding: package-purl` in `metadata.annotations`; the validator rejects malformed purls (unpinned version, unsupported type, empty name/version) with `spec.imageID` field-path errors, and rejects a `pkg:` imageID whose binding annotation is missing or has a different value. Plain-image (OCI ref) profiles are unaffected. Behavioral sections under `spec`:
 
 | Section | Declares | Phase 1 observable on |
 |---|---|---|

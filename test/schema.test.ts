@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { parseYaml } from "../src/yaml.ts";
 import { validateSbob } from "../src/schema.ts";
 import { buildIR } from "../src/ir.ts";
@@ -101,4 +102,68 @@ test("selector-only egress entries defer to Phase 3 with a coverage note", () =>
 test("port values are validated", () => {
   const src = VALID + `  egress:\n  - identifier: x\n    ipAddresses: [10.0.0.1/32]\n    ports: [{name: TCP-99999, protocol: TCP, port: 99999}]\n`;
   mustFail(src, "port");
+});
+
+// ---- imageID extension: package purls (pkg:nuget / pkg:choco, version-pinned) ----
+
+const PKG_BOUND = VALID.replace(
+  "imageID: docker.io/library/redis@sha256:e508c66a",
+  "imageID: pkg:nuget/develapp.minotaur@1.5.21",
+).replace(
+  "  name: redis\n",
+  "  name: redis\n  annotations:\n    develapp.io/binding: package-purl\n",
+);
+
+test("package-purl imageID with binding annotation validates (nuget and choco)", () => {
+  const doc = validateSbob(parseYaml(PKG_BOUND));
+  assert.equal(doc.spec.imageID, "pkg:nuget/develapp.minotaur@1.5.21");
+  const choco = PKG_BOUND.replace(
+    "pkg:nuget/develapp.minotaur@1.5.21",
+    "pkg:choco/develapp-minotaur@1.5.21",
+  );
+  assert.equal(validateSbob(parseYaml(choco)).spec.imageID, "pkg:choco/develapp-minotaur@1.5.21");
+});
+
+test("dogfood package-bound fixture validates (develapp-minotaur, issue #33)", () => {
+  const raw = readFileSync(
+    new URL("./package-fixtures/develapp-minotaur.linux.sbob.yaml", import.meta.url),
+    "utf8",
+  );
+  const doc = validateSbob(parseYaml(raw));
+  assert.equal(doc.metadata.annotations?.["develapp.io/binding"], "package-purl");
+  assert.equal(doc.spec.opens?.length, 3);
+});
+
+test("malformed package purls are rejected with field paths", () => {
+  // unpinned version
+  mustFail(
+    PKG_BOUND.replace("pkg:nuget/develapp.minotaur@1.5.21", "pkg:nuget/develapp.minotaur"),
+    "spec.imageID",
+  );
+  // unsupported purl type
+  mustFail(
+    PKG_BOUND.replace("pkg:nuget/develapp.minotaur@1.5.21", "pkg:npm/left-pad@1.0.0"),
+    "spec.imageID",
+  );
+  // empty name
+  mustFail(PKG_BOUND.replace("pkg:nuget/develapp.minotaur@1.5.21", "pkg:nuget/@1.0.0"), "spec.imageID");
+  // empty version
+  mustFail(PKG_BOUND.replace("pkg:nuget/develapp.minotaur@1.5.21", "pkg:nuget/develapp.minotaur@"), "spec.imageID");
+  // whitespace is not a purl character
+  mustFail(
+    PKG_BOUND.replace("pkg:nuget/develapp.minotaur@1.5.21", "pkg:nuget/devel app@1.5.21"),
+    "spec.imageID",
+  );
+  // scheme only
+  mustFail(PKG_BOUND.replace("pkg:nuget/develapp.minotaur@1.5.21", "pkg:"), "spec.imageID");
+});
+
+test("package purl without package-purl binding annotation is rejected", () => {
+  const noBinding = PKG_BOUND.replace("    develapp.io/binding: package-purl\n", "");
+  mustFail(noBinding, "spec.imageID");
+  const wrongBinding = PKG_BOUND.replace(
+    "develapp.io/binding: package-purl",
+    "develapp.io/binding: image-digest",
+  );
+  mustFail(wrongBinding, "spec.imageID");
 });
