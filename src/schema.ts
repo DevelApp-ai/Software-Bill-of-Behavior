@@ -29,6 +29,33 @@ function stringList(v: YamlValue, path: string): string[] {
   return arr.map((item, i) => reqString(item, `${path}[${i}]`));
 }
 
+/**
+ * Package purls accepted in spec.imageID for package-bound profiles
+ * (imageID extension, docs/TDS.md §2.1): `pkg:nuget/<name>@<version>` and
+ * `pkg:choco/<name>@<version>` (`choco` is a DevelApp extension type).
+ * Version-pinned by contract — an unpinned purl is not a stable binding.
+ * Such profiles must carry the annotation `develapp.io/binding: package-purl`
+ * so plain-image profiles are unaffected. Anything not starting with `pkg:`
+ * is treated as an OCI image reference (unchanged behavior).
+ */
+const PACKAGE_PURL = /^pkg:(nuget|choco)\/([A-Za-z0-9][A-Za-z0-9._-]*)@([A-Za-z0-9][A-Za-z0-9._+-]*)$/;
+
+function validateImageID(imageID: string, annotations: Record<string, string> | undefined): void {
+  if (!imageID.startsWith("pkg:")) return; // OCI image reference: unchanged
+  if (!PACKAGE_PURL.test(imageID)) {
+    fail(
+      "spec.imageID",
+      `"${imageID}" is not a version-pinned package purl of the form pkg:nuget/<name>@<version> or pkg:choco/<name>@<version>`,
+    );
+  }
+  if (annotations?.["develapp.io/binding"] !== "package-purl") {
+    fail(
+      "spec.imageID",
+      "package purl imageID requires the annotation develapp.io/binding: package-purl (docs/TDS.md §2.1)",
+    );
+  }
+}
+
 export function validateSbob(doc: YamlValue): SbobDocumentLike {
   const root = asMap(doc);
   const apiVersion = reqString(root["apiVersion"], "apiVersion");
@@ -47,6 +74,7 @@ export function validateSbob(doc: YamlValue): SbobDocumentLike {
 
   const spec = asMap(root["spec"]);
   const imageID = reqString(spec["imageID"], "spec.imageID");
+  validateImageID(imageID, annotations);
 
   const out: SbobDocumentLike = {
     apiVersion,
