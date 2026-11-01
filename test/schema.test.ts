@@ -124,6 +124,25 @@ test("package-purl imageID with binding annotation validates (nuget and choco)",
   assert.equal(validateSbob(parseYaml(choco)).spec.imageID, "pkg:choco/develapp-minotaur@1.5.21");
 });
 
+test("full package-purl ecosystem set validates (SBOB-Forge extraction matrix)", () => {
+  const cases = [
+    "pkg:nuget/develapp.minotaur@1.5.21",
+    "pkg:choco/develapp-minotaur@1.5.21",
+    "pkg:generic/example-bash-core@1.0.0",
+    "pkg:generic/example/c-core@1.0.0",
+    "pkg:golang/example.com/go-core@1.0.0",
+    "pkg:maven/com.example/example-core@1.0.0",
+    "pkg:npm/js-core@1.0.0",
+    "pkg:npm/@develapp/js-core@1.0.0",
+    "pkg:composer/example/php-core@1.0.0",
+    "pkg:pypi/example-py-core@1.0.0",
+  ];
+  for (const purl of cases) {
+    const doc = validateSbob(parseYaml(PKG_BOUND.replace("pkg:nuget/develapp.minotaur@1.5.21", purl)));
+    assert.equal(doc.spec.imageID, purl, `purl must validate: ${purl}`);
+  }
+});
+
 test("dogfood package-bound fixture validates (develapp-minotaur, issue #33)", () => {
   const raw = readFileSync(
     new URL("./package-fixtures/develapp-minotaur.linux.sbob.yaml", import.meta.url),
@@ -142,7 +161,12 @@ test("malformed package purls are rejected with field paths", () => {
   );
   // unsupported purl type
   mustFail(
-    PKG_BOUND.replace("pkg:nuget/develapp.minotaur@1.5.21", "pkg:npm/left-pad@1.0.0"),
+    PKG_BOUND.replace("pkg:nuget/develapp.minotaur@1.5.21", "pkg:rpm/left-pad@1.0.0"),
+    "spec.imageID",
+  );
+  // empty namespace segment in a multi-segment path
+  mustFail(
+    PKG_BOUND.replace("pkg:nuget/develapp.minotaur@1.5.21", "pkg:maven//example-core@1.0.0"),
     "spec.imageID",
   );
   // empty name
