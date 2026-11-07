@@ -1,0 +1,117 @@
+name: 'sbobctl'
+description: 'sbobctl as a GitHub Action — validate, verify (signed registry entry: offline bundle byte-binding + cosign keyless identity pin) and diff SBoB profiles, or run any sbobctl command. Zero-dependency TypeScript on Node 22 native type stripping; no npm install.'
+author: 'DevelApp-ai'
+
+branding:
+  icon: 'check-circle'
+  color: 'blue'
+
+inputs:
+  command:
+    description: 'sbobctl command: validate | verify | diff | transpile | profile | enforce (structured inputs below cover validate/verify/diff; use `args` for the rest)'
+    required: false
+    default: 'validate'
+  sbob:
+    description: 'SBoB YAML path, workspace-relative (validate/verify; whitespace-separated multiple paths for transpile)'
+    required: false
+    default: ''
+  old:
+    description: '(diff) prior-release SBoB YAML path'
+    required: false
+    default: ''
+  new:
+    description: '(diff) next-release SBoB YAML path'
+    required: false
+    default: ''
+  fail-on:
+    description: '(diff) exit non-zero at this verdict or above: none | advisory | mandatory'
+    required: false
+    default: 'mandatory'
+  certificate-identity:
+    description: '(verify) workflow identity the signing certificate must pin (SAN) — enables the cosign keyless stage; requires cosign on PATH (e.g. sigstore/cosign-installer)'
+    required: false
+    default: ''
+  certificate-oidc-issuer:
+    description: '(verify) OIDC issuer of the signing certificate (default: https://token.actions.githubusercontent.com)'
+    required: false
+    default: ''
+  report-name:
+    description: '(diff) base name for the JSON delta report written under the report path'
+    required: false
+    default: 'sbob-delta'
+  args:
+    description: 'Extra raw sbobctl arguments appended verbatim (whitespace-split, each token shell-quoted). Use for transpile/profile/enforce flags.'
+    required: false
+    default: ''
+
+outputs:
+  exit-code:
+    description: 'sbobctl exit code (0 ok; 1 SbobError; 2 usage) — the workflow can branch on it without failing the step'
+    value: ${{ steps.sbobctl.outputs.exit-code }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: 'Set up Node 22 (zero-dependency CLI; native TypeScript type stripping, no npm install)'
+      uses: actions/setup-node@v5
+      with:
+        node-version: 22
+
+    - name: 'Run sbobctl'
+      id: sbobctl
+      shell: bash
+      env:
+        SBOB_CLI: ${{ github.action_path }}/src/cli.ts
+        SBOB_COMMAND: ${{ inputs.command }}
+        SBOB_SBOB: ${{ inputs.sbob }}
+        SBOB_OLD: ${{ inputs.old }}
+        SBOB_NEW: ${{ inputs.new }}
+        SBOB_FAIL_ON: ${{ inputs.fail-on }}
+        SBOB_CERT_IDENTITY: ${{ inputs.certificate-identity }}
+        SBOB_CERT_ISSUER: ${{ inputs.certificate-oidc-issuer }}
+        SBOB_REPORT_NAME: ${{ inputs.report-name }}
+        SBOB_ARGS: ${{ inputs.args }}
+        SBOB_OUT: ${{ runner.temp }}/sbobctl-action
+      run: |
+        set -euo pipefail
+        mkdir -p "$SBOB_OUT"
+
+        args=()
+        case "$SBOB_COMMAND" in
+          validate)
+            [ -n "$SBOB_SBOB" ] || { echo "input 'sbob' is required for command=validate" >&2; exit 2; }
+            for f in $SBOB_SBOB; do args+=(--sbob "$f"); done
+            ;;
+          verify)
+            [ -n "$SBOB_SBOB" ] || { echo "input 'sbob' is required for command=verify" >&2; exit 2; }
+            for f in $SBOB_SBOB; do args+=(--sbob "$f"); done
+            [ -n "$SBOB_CERT_IDENTITY" ] && args+=(--certificate-identity "$SBOB_CERT_IDENTITY")
+            [ -n "$SBOB_CERT_ISSUER" ] && args+=(--certificate-oidc-issuer "$SBOB_CERT_ISSUER")
+            ;;
+          diff)
+            [ -n "$SBOB_OLD" ] && [ -n "$SBOB_NEW" ] || { echo "inputs 'old' and 'new' are required for command=diff" >&2; exit 2; }
+            args+=(--old "$SBOB_OLD" --new "$SBOB_NEW" --fail-on "$SBOB_FAIL_ON" --report "$SBOB_OUT/$SBOB_REPORT_NAME.json")
+            ;;
+          transpile|profile|enforce)
+            for f in $SBOB_SBOB; do args+=(--sbob "$f"); done
+            ;;
+          *)
+            echo "unknown command: $SBOB_COMMAND" >&2
+            exit 2
+            ;;
+        esac
+        # raw passthrough — each token shell-quoted, no eval, injection-safe
+        for a in $SBOB_ARGS; do args+=("$a"); done
+
+        set +e
+        node "$SBOB_CLI" "$SBOB_COMMAND" "${args[@]}" 2> "$SBOB_OUT/cli-stderr.txt"
+        rc=$?
+        set -e
+
+        echo "exit-code=$rc" >> "$GITHUB_OUTPUT"
+        {
+          echo "### sbobctl $SBOB_COMMAND — exit $rc"
+          echo
+          [ -s "$SBOB_OUT/cli-stderr.txt" ] && cat "$SBOB_OUT/cli-stderr.txt"
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit 0

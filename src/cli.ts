@@ -25,6 +25,7 @@ import { lintIR } from "./lint.ts";
 import { transpile } from "./transpile.ts";
 import { runEnforce } from "./enforce.ts";
 import { diffSbobs, formatDiffReport, type GateVerdict } from "./diffgate.ts";
+import { verifyEntry, normalizeVerifyOptions } from "./verify.ts";
 import {
   parseEventStream, profileEvents,
   DEFAULT_WINDOW_DAYS, STEADY_CUTOFF_DEFAULT, SPORADIC_CUTOFF_DEFAULT, CADENCE_TOLERANCE_DEFAULT,
@@ -42,6 +43,8 @@ commands:
   enforce    generate the Phase-3 enforcement bundle from an SBoB + rollout
              state file (seccomp/AppArmor/NetworkPolicy/AppLocker + active
              responses, Monitor->Audit->Enforce gated, M7)
+  verify     verify a signed registry entry: offline bundle byte-binding
+             plus optional cosign keyless verification with an identity pin
 
 options:
   --sbob <path>                 SBoB YAML file (repeatable for transpile)
@@ -57,6 +60,10 @@ options:
                                  with the evidence; unlisted pairs stay pending
   --state <path>                 (enforce) per-workload rollout state file (TDS 14)
   --enforced-np <path>           (enforce) peers JSON of the live NetworkPolicy (np-diff, TDS 14.4)
+  --certificate-identity <id>     (verify) workflow identity the signing certificate must
+                                 pin (SAN); enables cosign verify-blob stage
+  --certificate-oidc-issuer <url> (verify) OIDC issuer of the signing certificate
+                                 (default: https://token.actions.githubusercontent.com)
   --old <path>                  (diff) prior-release SBoB YAML
   --new <path>                  (diff) next-release SBoB YAML
   --report <path>               (diff) write the machine-readable JSON delta report here
@@ -105,6 +112,8 @@ interface Args {
   internalSuffixes: string[];
   statePath: string;
   enforcedNpPath: string;
+  certificateIdentity: string;
+  certificateOidcIssuer: string;
   events: string;
   profWorkload: string;
   image: string;
@@ -137,6 +146,8 @@ function parseArgs(argv: string[]): Args {
     internalSuffixes: [],
     statePath: "",
     enforcedNpPath: "",
+    certificateIdentity: "",
+    certificateOidcIssuer: "",
     events: "",
     profWorkload: "",
     image: "",
@@ -175,6 +186,8 @@ function parseArgs(argv: string[]): Args {
     else if (a === "--internal-suffix") args.internalSuffixes.push(next());
     else if (a === "--state") args.statePath = next();
     else if (a === "--enforced-np") args.enforcedNpPath = next();
+    else if (a === "--certificate-identity") args.certificateIdentity = next();
+    else if (a === "--certificate-oidc-issuer") args.certificateOidcIssuer = next();
     else if (a === "--events") args.events = next();
     else if (a === "--workload") args.profWorkload = next();
     else if (a === "--image") args.image = next();
@@ -294,6 +307,24 @@ async function main(): Promise<void> {
       console.log(result.reviewReport);
       if (result.status !== "candidate") {
         exit(1);
+      }
+    } else if (args.command === "verify") {
+      if (args.sbob.length !== 1) usage();
+      const entry = args.sbob[0] as string;
+      // the entry must still be a schema-valid SBoB (registry dialect —
+      // the transpiler-replay lane proves validate covers it)
+      const raw = readFileSync(entry, "utf8");
+      const doc = validateSbob(parseYaml(raw));
+      const report = await verifyEntry(entry, {
+        certificateIdentity: args.certificateIdentity,
+        certificateOidcIssuer: args.certificateOidcIssuer,
+      });
+      console.log(`OK: ${doc.metadata.name} (${doc.metadata.namespace})`);
+      console.log(`  bundle byte-binding: sha256 of "${entry}" matches the Rekor entry (${report.entrySha256.slice(0, 16)}…)`);
+      if (report.identityVerified) {
+        console.log(`  cosign verify-blob: signature VERIFIED against identity "${args.certificateIdentity}" (issuer ${args.certificateOidcIssuer || "https://token.actions.githubusercontent.com"})`);
+      } else {
+        console.log("  note: offline byte-binding only — pass --certificate-identity <workflow identity> to verify the keyless signature end to end");
       }
     } else if (args.command === "enforce") {
       if (args.sbob.length !== 1) usage();

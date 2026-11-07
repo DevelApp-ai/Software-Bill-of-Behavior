@@ -75,6 +75,16 @@ node src/cli.ts transpile --sbob sbobs/redis.yaml --out dist/bundle-logpoint --t
 # schema-validate only
 node src/cli.ts validate --sbob sbobs/redis.yaml
 
+# verify a signed registry entry (consumer-side trust primitive):
+# stage 1 — offline byte-binding: the cosign Rekor bundle must commit
+#   sha256 == the shipped entry bytes (catches tampered entries and
+#   signatures that bind pre-convert bytes; no cosign, no network);
+# stage 2 — optional keyless verification against a pinned workflow identity
+node src/cli.ts verify --sbob registry/sbobs/nuget/myapp.linux.yaml
+node src/cli.ts verify --sbob registry/sbobs/nuget/myapp.linux.yaml \
+  --certificate-identity "https://github.com/acme/app/.github/workflows/publish.yml@refs/heads/main"
+#   (--certificate-oidc-issuer defaults to https://token.actions.githubusercontent.com)
+
 # tests (unit + golden bundle comparison)
 node --test test/*.test.ts
 
@@ -98,7 +108,23 @@ Workload rule IDs are derived deterministically from the slot registry (`docs/sb
 
 ## Promotion gate (reusable GitHub Action)
 
-The repo ships a composite action wrapping `sbobctl diff` — the M8 release gate in CI form ([#22](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/22)):
+The repo ships two composite actions: the root [`action.yml`](action.yml) wraps `sbobctl diff` — the M8 release gate in CI form ([#22](https://github.com/DevelApp-ai/Software-Bill-of-Behavior/issues/22)) — and the generic [`sbobctl/`](sbobctl/action.yml) action wraps the whole CLI (validate / verify / diff with structured inputs, any command via raw `args`):
+
+```yaml
+      # consumer-side registry-entry verification
+      - uses: DevelApp-ai/Software-Bill-of-Behavior/sbobctl@<sha>
+        with:
+          command: verify
+          sbob: registry/sbobs/nuget/myapp.linux.yaml
+          certificate-identity: "https://github.com/acme/app/.github/workflows/publish.yml@refs/heads/main"
+      # … or any command via raw args passthrough
+      - uses: DevelApp-ai/Software-Bill-of-Behavior/sbobctl@<sha>
+        with:
+          command: transpile
+          args: --sbob sbobs/redis.yaml --out dist/bundle --skip-signature-verify
+```
+
+The diff gate (root action):
 
 ```yaml
 jobs:
