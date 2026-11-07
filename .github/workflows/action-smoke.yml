@@ -1,0 +1,127 @@
+name: action-smoke
+
+# SBOB-Registry #32 — the shipped sbobctl/ composite action must keep working
+# from a consumer-shaped checkout on every PR and on main. The tampered-bundle
+# step is the deliberately-broken control: a broken verification path must
+# fail this lane, never pass silently.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  sbobctl-action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fixture — signed-entry shape (UTF-16LE Rekor bundle, production form)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/smoke
+          cp test/diffgate-fixtures/base.yaml /tmp/smoke/app.linux.yaml
+          # stage-1 byte-binding: the bundle commits the exact sha256 of the entry bytes
+          sha="$(sha256sum /tmp/smoke/app.linux.yaml | cut -d' ' -f1)"
+          body="$(printf '{"body":{"hashedrekord":{"data":{"hash":{"algorithm":"sha256","value":"%s"}}}}}' "$sha")"
+          b64="$(printf '%s' "$body" | base64 -w0)"
+          printf '{"rekorBundle":{"Payload":{"body":"%s"}}}' "$b64" > /tmp/smoke/bundle.utf8.json
+          # the publish lane emits UTF-16LE bundles on windows runners — pin that here
+          { printf '\xff\xfe'; iconv -f UTF-8 -t UTF-16LE < /tmp/smoke/bundle.utf8.json; } > /tmp/smoke/app.linux.yaml.bundle
+          printf 'offline-fixture-signature' > /tmp/smoke/app.linux.yaml.sig
+          # tampered twin: the bundle commits a DIFFERENT hash (defect-A shape)
+          body0="$(printf '{"body":{"hashedrekord":{"data":{"hash":{"algorithm":"sha256","value":"%s"}}}}}' "$(printf '%064d' 0)")"
+          b640="$(printf '%s' "$body0" | base64 -w0)"
+          printf '{"rekorBundle":{"Payload":{"body":"%s"}}}' "$b640" > /tmp/smoke/bundle0.utf8.json
+          { printf '\xff\xfe'; iconv -f UTF-8 -t UTF-16LE < /tmp/smoke/bundle0.utf8.json; } > /tmp/smoke/tampered.linux.yaml.bundle
+          printf 'offline-fixture-signature' > /tmp/smoke/tampered.linux.yaml.sig
+          cp test/diffgate-fixtures/base.yaml /tmp/smoke/tampered.linux.yaml
+          sha256sum /tmp/smoke/app.linux.yaml /tmp/smoke/tampered.linux.yaml
+
+      # consumer shape 1 — validate a committed profile
+      - name: 'sbobctl action: validate'
+        id: validate
+        uses: ./sbobctl
+        with:
+          command: validate
+          sbob: sbobs/redis.yaml
+      - name: assert validate exit-code 0
+        run: test "${{ steps.validate.outputs.exit-code }}" = 0
+
+      # consumer shape 2 — the M8 diff gate: mandatory drift must exit 1
+      - name: 'sbobctl action: diff (mandatory verdict)'
+        id: diff-mandatory
+        uses: ./sbobctl
+        with:
+          command: diff
+          old: test/diffgate-fixtures/base.yaml
+          new: test/diffgate-fixtures/drifted.yaml
+          fail-on: mandatory
+      - name: assert diff-mandatory exit-code 1 (gate verdict surfaces, action does not fail the job)
+        run: test "${{ steps.diff-mandatory.outputs.exit-code }}" = 1
+
+      - name: 'sbobctl action: diff (clean)'
+        id: diff-clean
+        uses: ./sbobctl
+        with:
+          command: diff
+          old: test/diffgate-fixtures/base.yaml
+          new: test/diffgate-fixtures/base.yaml
+          fail-on: mandatory
+      - name: assert diff-clean exit-code 0
+        run: test "${{ steps.diff-clean.outputs.exit-code }}" = 0
+
+      # consumer shape 3 — verify, offline stage-1 byte-binding (UTF-16LE bundle)
+      - name: 'sbobctl action: verify (offline byte-binding)'
+        id: verify-good
+        uses: ./sbobctl
+        with:
+          command: verify
+          sbob: /tmp/smoke/app.linux.yaml
+      - name: assert verify-good exit-code 0
+        run: test "${{ steps.verify-good.outputs.exit-code }}" = 0
+
+      # deliberately-broken control — a tampered entry must never pass
+      - name: 'sbobctl action: verify (tampered bundle — must reject)'
+        id: verify-tampered
+        uses: ./sbobctl
+        with:
+          command: verify
+          sbob: /tmp/smoke/tampered.linux.yaml
+      - name: assert verify-tampered exit-code 1 (lane fails if the tampered entry ever passes)
+        run: test "${{ steps.verify-tampered.outputs.exit-code }}" = 1
+
+      # fail-closed control — identity pin without cosign on PATH must reject
+      - name: 'sbobctl action: verify (identity pin, no cosign on PATH — must reject)'
+        id: verify-nocosign
+        uses: ./sbobctl
+        with:
+          command: verify
+          sbob: /tmp/smoke/app.linux.yaml
+          certificate-identity: https://github.com/DevelApp-ai/SBOB-Forge/.github/workflows/sbob-registry-publish.yml@refs/heads/main
+      - name: assert verify-nocosign exit-code 1
+        run: test "${{ steps.verify-nocosign.outputs.exit-code }}" = 1
+
+      # consumer shape 4 — raw args passthrough (no structured inputs needed)
+      - name: 'sbobctl action: transpile via raw args'
+        id: transpile
+        uses: ./sbobctl
+        with:
+          command: transpile
+          sbob: sbobs/redis.yaml
+          args: --target linux --skip-signature-verify --out /tmp/smoke/bundle
+      - name: assert transpile exit-code 0
+        run: test "${{ steps.transpile.outputs.exit-code }}" = 0
+
+      # wrapper ↔ CLI surface equivalence: the action must not drift from the CLI
+      - name: CLI ↔ action surface equivalence
+        run: |
+          set -euo pipefail
+          node src/cli.ts >/dev/null 2>/tmp/smoke/usage.txt || test "$?" -eq 2
+          for cmd in validate verify diff transpile profile enforce; do
+            grep -qw "$cmd" /tmp/smoke/usage.txt || { echo "CLI usage no longer lists $cmd" >&2; exit 1; }
+            grep -q "$cmd" sbobctl/action.yml || { echo "sbobctl action surface no longer lists $cmd" >&2; exit 1; }
+          done
+          grep -q "diff" action.yml || { echo "root diff-gate action drifted" >&2; exit 1; }
+          echo "equivalence OK: action surfaces mirror the CLI"
