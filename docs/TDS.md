@@ -703,3 +703,11 @@ With `--baseline <prior.yaml>` the profiler runs the M8 gate baseline → candid
 | `ERR_PROFILE_EVENT` | profiler (M9): a normalized event line is malformed, or the internal candidate round-trip check failed |
 | `ERR_PROFILE_SCOPE` | profiler (M9): the event stream contains no events for the requested workload |
 | `ERR_PROFILE_DISPOSITION` | profiler (M9): reviewer dispositions are invalid — a plain-allow declare without a written reason, an exemption without a future expiry, or an override naming an entry the window never observed |
+| `ERR_LAB_VALIDATION` | transpile: a `--lab-validation` evidence record is malformed (missing run URL, unknown target, bad date) |
+| `ERR_VERIFY_ENTRY_MISSING` | verify: the registry entry file does not exist or is unreadable |
+| `ERR_VERIFY_SIG_MISSING` | verify: no detached signature sidecar (`<entry>.sig`) next to the registry entry |
+| `ERR_VERIFY_BUNDLE_MISSING` | verify: no cosign Rekor bundle sidecar (`<entry>.bundle`) next to the registry entry |
+| `ERR_VERIFY_BUNDLE_MALFORMED` | verify: the bundle is not valid JSON, has no Rekor entry body (`.rekorBundle.Payload.body`, legacy `.bundle.Payload.body`), or carries no sha256 hashedrekord hash |
+| `ERR_VERIFY_HASH_MISMATCH` | verify: offline byte-binding failed — the Rekor entry commits a different sha256 than the shipped entry bytes (the v1.5.39 defect-A class: the signature does not bind to this file; reject it) |
+| `ERR_VERIFY_COSIGN_UNAVAILABLE` | verify: an identity pin was requested but no cosign binary is on PATH — install cosign or drop `--certificate-identity` for an offline byte-binding check only |
+| `ERR_VERIFY_COSIGN_FAILED` | verify: `cosign verify-blob` rejected the signature or identity pin, or `--certificate-oidc-issuer` was passed without `--certificate-identity` |
