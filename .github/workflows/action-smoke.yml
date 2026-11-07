@@ -14,6 +14,9 @@ on:
 jobs:
   sbobctl-action:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v5
 
@@ -125,3 +128,38 @@ jobs:
           done
           grep -q "diff" action.yml || { echo "root diff-gate action drifted" >&2; exit 1; }
           echo "equivalence OK: action surfaces mirror the CLI"
+
+      # self-reporting: a failed lane posts its exit-code plumbing + CLI stderr
+      # to the PR so the failure is diagnosable from the conversation itself
+      - name: 'Failure diagnostics → PR comment'
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## action-smoke failure diagnostics (run $RUN_ID)"
+            echo
+            echo "action exit-codes:"
+            echo "- validate: \`${{ steps.validate.outputs.exit-code }}\`"
+            echo "- diff-mandatory: \`${{ steps.diff-mandatory.outputs.exit-code }}\`"
+            echo "- diff-clean: \`${{ steps.diff-clean.outputs.exit-code }}\`"
+            echo "- verify-good: \`${{ steps.verify-good.outputs.exit-code }}\`"
+            echo "- verify-tampered: \`${{ steps.verify-tampered.outputs.exit-code }}\`"
+            echo "- verify-nocosign: \`${{ steps.verify-nocosign.outputs.exit-code }}\`"
+            echo "- transpile: \`${{ steps.transpile.outputs.exit-code }}\`"
+            echo
+            echo "last CLI stderr (\`cli-stderr.txt\`):"
+            echo
+            echo '```'
+            cat "${RUNNER_TEMP}/sbobctl-action/cli-stderr.txt" 2>/dev/null || echo "(missing)"
+            echo '```'
+          } > /tmp/diag.md
+          jq -Rs '{body: .}' < /tmp/diag.md > /tmp/diag.json
+          curl -sS -f -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            --data-binary @/tmp/diag.json \
+            "https://api.github.com/repos/${{ github.repository }}/issues/$PR_NUMBER/comments"
