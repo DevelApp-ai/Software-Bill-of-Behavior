@@ -43,6 +43,10 @@ inputs:
     description: 'Extra raw sbobctl arguments appended verbatim (whitespace-split, each token shell-quoted). Use for transpile/profile/enforce flags.'
     required: false
     default: ''
+  working-directory:
+    description: 'Working directory for the CLI — SBoB paths resolve against it (default: the workspace root)'
+    required: false
+    default: ''
 
 outputs:
   exit-code:
@@ -60,6 +64,10 @@ runs:
     - name: 'Run sbobctl'
       id: sbobctl
       shell: bash
+      # composite run steps default their working directory to the action's own
+      # directory — SBoB paths are workspace-relative, so resolve from the
+      # workspace (or the caller-supplied working-directory) instead
+      working-directory: ${{ inputs.working-directory != '' && inputs.working-directory || github.workspace }}
       env:
         SBOB_CLI: ${{ github.action_path }}/src/cli.ts
         SBOB_COMMAND: ${{ inputs.command }}
