@@ -69,7 +69,12 @@ runs:
       # workspace (or the caller-supplied working-directory) instead
       working-directory: ${{ inputs.working-directory != '' && inputs.working-directory || github.workspace }}
       env:
-        SBOB_CLI: ${{ github.action_path }}/src/cli.ts
+        # action_path is the sbobctl/ directory; the zero-dependency CLI lives
+        # at the repo root, one level up — identical for a local `uses: ./sbobctl`
+        # and a consumer's `uses: DevelApp-ai/Software-Bill-of-Behavior/sbobctl@<sha>`
+        # (the runner fetches the whole repository, then pins action_path to the
+        # sbobctl/ subdirectory)
+        SBOB_CLI: ${{ github.action_path }}/../src/cli.ts
         SBOB_COMMAND: ${{ inputs.command }}
         SBOB_SBOB: ${{ inputs.sbob }}
         SBOB_OLD: ${{ inputs.old }}
@@ -83,6 +88,7 @@ runs:
       run: |
         set -euo pipefail
         mkdir -p "$SBOB_OUT"
+        [ -f "$SBOB_CLI" ] || { echo "sbobctl CLI not found at $SBOB_CLI (expected src/cli.ts at the Software-Bill-of-Behavior repo root)" >&2; exit 2; }
 
         args=()
         case "$SBOB_COMMAND" in
