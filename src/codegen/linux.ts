@@ -3,25 +3,45 @@
  *
  * Emits, per workload:
  *   - wazuh/audit/sbob/<name>.rules        auditctl fragment (Mode A preferred)
- *   - wazuh/decoders/sbob/<name>.xml       custom decoder chain (lab validation pending)
- *   - wazuh/lists/sbob/<name>/*            CDB allowlists (execs, opens, egress_addrs, ingress_addrs,
- *                                          sigexempts/<policy> for rulePolicies.processAllowed, M4)
- *   - wazuh/rules/sbob/<base>_<name>_linux.xml   drift rules + signature pack (rulePolicies, M4)
- *                                          + ops section (config-check, M5)
+ *   - wazuh/decoders/<name>.xml            auditd-generic tail-join children
+ *                                          (sbob.saddr / sbob.sbob.path payloads)
+ *   - wazuh/lists/sbob/<name>/*            CDB allowlists (execs, opens, egress_addrs,
+ *                                          ingress_addrs, sigexempts/<policy> for
+ *                                          rulePolicies.processAllowed, M4)
+ *   - wazuh/rules/<base>_<name>_linux.xml   drift rules + signature pack (rulePolicies,
+ *                                          M4) + ops section (config-check, M5)
  *   - wazuh/agent-conf/sbob/<name>.xml     config-check command wodle (M5, TDS 10.1)
  *   - wazuh/agent-conf/sbob/<name>-audit-digest.sh   node-side digest script (M5)
  *   - <name>.manifest.json                 workload bundle manifest + coverage matrix (TDS 8)
  *
- * The audit fragment, CDB lists, decoder chain and section drift rules are
+ * Wazuh 4.14.6 engine facts this codegen is written against (lab-validated,
+ * see docs/lab-validation.yaml):
+ *   - Root rules never fire for auditd-decoded events: the shipped level-0
+ *     rule 80700 "Audit: Messages grouped" (0365-auditd_rules.xml) matches
+ *     every auditd event and the main loop stops at the first matching
+ *     level-0 rule. Every sbob auditd rule therefore anchors on
+ *     <if_sid>80700</if_sid>.
+ *   - The shipped auditd decoder family (0040-auditd_decoders.xml) already
+ *     extracts audit.key / audit.command / audit.exe / audit.type on SYSCALL
+ *     lines. Custom sbob payloads (SOCKADDR saddr=, PATH name=) ride a
+ *     re-declared auditd-generic tail-join; the old custom decoder chain
+ *     (sbob.key / sbob.exe) was preempted by the shipped root and is gone.
+ *   - Egress is evaluated in the RAW saddr hex space (family+port+ip+padding,
+ *     uppercase): /32 (ip,port) pairs as exact CDB keys on sbob.saddr, wider
+ *     CIDRs as PCRE2 byte patterns (src/codegen/saddr.ts).
+ *   - Sustained correlation: frequency/timeframe are RULE-ELEMENT ATTRIBUTES
+ *     and the parent is referenced via <if_matched_sid>, not <if_sid>.
+ *
+ * The audit fragment, CDB lists, decoder file and section drift rules are
  * shared with the k8s-node target (TDS 6.3: k8s nodes run the Linux agent and
  * share the variant band) and are exported for src/codegen/k8s.ts to compose.
  */
 import { negatedAlternation, xmlEscape } from "../regexp.ts";
-import { portAlternation } from "../wildcards.ts";
 import type { IdAllocator } from "../ruleids.ts";
 import type { IR } from "../types.ts";
 import type { Decoder, XmlRule } from "./xml.ts";
 import { renderDecoder, renderRule, xmlFileHeader } from "./xml.ts";
+import { saddrHex, saddrCidrPattern } from "./saddr.ts";
 import { signatureAuditLines, signatureExemptListFiles, signatureRulesShared, signatureCoverageNotes } from "./signatures.ts";
 import {
   auditKeySetDigest,
@@ -36,6 +56,19 @@ import { buildCoverageMatrix, assertCoverageComplete } from "../coverage.ts";
 export interface BundleFile {
   path: string;
   content: string;
+}
+
+/**
+ * The shipped auditd anchor rule (0365-auditd_rules.xml, level 0, decoded_as
+ * auditd). Every sbob auditd-facing rule MUST be its descendant: analysisd
+ * stops at the first matching level-0 rule and 80700 matches every auditd
+ * event, so later root rules are never evaluated (lab finding).
+ */
+export const AUDITD_ANCHOR_RULE = 80700;
+
+/** Deployed CDB list paths live under /var/ossec/etc/lists/ (TDS 6.4). */
+export function listSrc(name: string, rest: string): string {
+  return `etc/lists/sbob/${name}/${rest}`;
 }
 
 const LAB_NOTE_PENDING =
@@ -108,6 +141,49 @@ export function auditFragmentLines(ir: IR): { lines: string[]; auditKeys: string
   return { lines, auditKeys, modeA };
 }
 
+/**
+ * Compiled egress allow-model: exact CDB hex keys (raw saddr space) plus PCRE2
+ * patterns for the entries a CDB key cannot express (any-port /32s, wider
+ * CIDRs). IPv6 entries cannot be keyed in the AF_INET hex model and are
+ * reported back to the caller for a coverage note.
+ */
+export function egressAllowModel(ir: IR): {
+  cdbKeys: Array<{ key: string; value: string }>;
+  patterns: string[];
+  skippedIpv6: string[];
+} {
+  const cdbKeys: Array<{ key: string; value: string }> = [];
+  const patterns: string[] = [];
+  const skippedIpv6: string[] = [];
+  for (const e of ir.sections.egress?.entries ?? []) {
+    if (e.anyIp) continue; // '*' entry: no address condition is emitted (TDS 6.4)
+    const identifier = e.source.identifier ?? "unnamed";
+    for (const addr of e.addrEntries) {
+      const m = /^(\d{1,3}(?:\.\d{1,3}){3})\/(\d+)$/.exec(addr);
+      if (m === null) {
+        skippedIpv6.push(`${addr} (${identifier})`);
+        continue;
+      }
+      const ip = m[1]!;
+      const mask = Number(m[2]);
+      if (mask === 32) {
+        const ports = e.ports.filter((p): p is number => typeof p === "number");
+        if (ports.length > 0) {
+          for (const port of ports) cdbKeys.push({ key: saddrHex(ip, port), value: identifier });
+        } else {
+          // ANY port on a /32: not a single CDB key; byte pattern with a free port
+          patterns.push(`0200[0-9A-F]{4}${saddrHex(ip, 0).slice(8, 16)}${"0".repeat(16)}`);
+        }
+      } else {
+        for (const port of e.ports) {
+          patterns.push(saddrCidrPattern(addr, port));
+        }
+      }
+    }
+  }
+  return { cdbKeys, patterns, skippedIpv6 };
+}
+
 /** CDB allowlist files for the workload (TDS 6.4). */
 export function cdbListFiles(ir: IR, name: string): BundleFile[] {
   const files: BundleFile[] = [];
@@ -129,65 +205,109 @@ export function cdbListFiles(ir: IR, name: string): BundleFile[] {
           .join("\n") + "\n",
     });
   }
-  for (const dir of ["egress", "ingress"] as const) {
-    const sec = s[dir];
-    if (!sec || sec.exact.length === 0) continue;
-    files.push({
-      path: `wazuh/lists/sbob/${name}/${dir}_addrs`,
-      content: CDB_HEADER(`${dir} CDB address list: key=ip/mask (canonicalized), value=identifier`) +
-        sec.entries
-          .flatMap((e) => e.addrEntries.map((a) => `${a}:${e.source.identifier ?? "unnamed"}`))
-          .join("\n") + "\n",
-    });
+  if (s.egress !== undefined) {
+    const model = egressAllowModel(ir);
+    if (model.cdbKeys.length > 0 || model.patterns.length > 0) {
+      const header = [
+        "# sbob egress CDB address list: key = raw auditd saddr hex (AF_INET:",
+        "#   family 0200 + port (4 hex BE) + ip (8 hex BE) + zero padding), UPPERCASE",
+        "#   — matches the SOCKADDR record byte-for-byte; CDB is exact-match and",
+        "#   case-sensitive (wazuh 4.14.6 lab model, TDS 7.3.1).",
+        `# value = identifier. Workload: ${name}.`,
+        ...model.patterns.map((p) => `# (not a CDB key; evaluated in-rule): ${p}`),
+        ...model.skippedIpv6.map((a) => `# NOT EVALUABLE (IPv6 outside the AF_INET hex model): ${a}`),
+        "",
+      ].join("\n");
+      files.push({
+        path: `wazuh/lists/sbob/${name}/egress_addrs`,
+        content:
+          header +
+          model.cdbKeys.map((k) => `${k.key}:${k.value}`).join("\n") +
+          (model.cdbKeys.length > 0 ? "\n" : ""),
+      });
+    }
+  }
+  if (s.ingress !== undefined) {
+    const model = ingressAllowModel(ir);
+    if (model.cdbKeys.length > 0 || model.patterns.length > 0) {
+      const header = [
+        "# sbob ingress CDB address list: key = raw auditd saddr hex (AF_INET,",
+        "#   UPPERCASE), value = identifier (documented partial on Linux: accept()-side",
+        "#   peer attribution needs host-firewall ingestion, TDS 8).",
+        `# Workload: ${name}.`,
+        "",
+      ].join("\n");
+      files.push({
+        path: `wazuh/lists/sbob/${name}/ingress_addrs`,
+        content:
+          header +
+          model.cdbKeys.map((k) => `${k.key}:${k.value}`).join("\n") +
+          (model.cdbKeys.length > 0 ? "\n" : ""),
+      });
+    }
   }
   // signature exemptions (rulePolicies.processAllowed, M4): CDB sigexempts
   for (const f of signatureExemptListFiles(ir, name)) files.push(f);
   return files;
 }
 
-/** Custom decoder chain for the workload's audit keys (TDS 7.3 work items). */
+/** Ingress allow-model: CDB hex keys only (informational rules consume it). */
+function ingressAllowModel(ir: IR): { cdbKeys: Array<{ key: string; value: string }>; patterns: string[] } {
+  const cdbKeys: Array<{ key: string; value: string }> = [];
+  for (const e of ir.sections.ingress?.entries ?? []) {
+    if (e.anyIp) continue;
+    const identifier = e.source.identifier ?? "unnamed";
+    for (const addr of e.addrEntries) {
+      const m = /^(\d{1,3}(?:\.\d{1,3}){3})\/32$/.exec(addr);
+      if (m === null) continue;
+      for (const port of e.ports) {
+        if (typeof port === "number") cdbKeys.push({ key: saddrHex(m[1]!, port), value: identifier });
+      }
+    }
+  }
+  return { cdbKeys, patterns: [] };
+}
+
+/**
+ * Decoder file content for the workload: re-declared shipped auditd-generic
+ * plus the two sbob payload tail-join children.
+ *
+ * Lab finding (wazuh 4.14.6): a custom root decoder (prematch type=SYSCALL…)
+ * is preempted by the shipped auditd root, and the shipped auditd-syscall
+ * children already decode audit.key/audit.command/audit.exe on SYSCALL lines.
+ * SOCKADDR and PATH records carry NO key, so their payloads (saddr=, name=)
+ * are extracted by tail-joining the shipped auditd-generic chain instead:
+ * re-declaring "auditd-generic" in this file attaches our children to the
+ * shipped decoder without touching it.
+ */
 export function auditDecoders(name: string, auditKeys: string[]): Decoder[] {
   return [
     {
-      name: `sbob-${name}-audit-root`,
-      prematch: "\\d:type=SYSCALL msg=audit(\\d+): arch=\\S+ syscall=\\S+ ",
-      comment: `root decoder for sbob-scoped audit events (${auditKeys.join(", ")})`,
+      name: "auditd-generic",
+      comment:
+        `re-declared (NOT modified) to attach the sbob payload children below; the shipped ` +
+        `auditd-generic (0040-auditd_decoders.xml) already extracts audit.type/audit.key/` +
+        `audit.command/audit.exe — the old custom sbob root/key/exe chain was preempted ` +
+        `by the shipped auditd root and removed (wazuh 4.14.6 lab finding)`,
     },
     {
-      name: `sbob-${name}-audit-key`,
-      parent: `sbob-${name}-audit-root`,
-      regex: 'key="(\\S+)"',
-      order: "sbob.key",
-    },
-    {
-      name: `sbob-${name}-audit-exe`,
-      parent: `sbob-${name}-audit-key`,
-      regex: 'exe="(\\S+)"',
-      order: "sbob.exe",
-    },
-    {
-      name: `sbob-${name}-audit-comm`,
-      parent: `sbob-${name}-audit-key`,
-      regex: 'comm="(\\S+)"',
-      order: "sbob.comm",
-    },
-    {
-      name: `sbob-${name}-audit-saddr`,
-      parent: `sbob-${name}-audit-key`,
+      name: `sbob-${name}-saddr`,
+      parent: "auditd-generic",
       regex: "saddr=(\\S+)",
       order: "sbob.saddr",
-      comment: "raw sockaddr; hex AF_INET decode to sbob.dst_ip/sbob.dst_port is the saddr work item (TDS 7.3.1)",
+      comment:
+        "raw sockaddr hex of SOCKADDR records (AF_INET: family 0200 + port + ip + padding, UPPERCASE); " +
+        "the egress CDB lists key on this byte string (TDS 7.3.1 raw-hex model)",
     },
     {
-      name: `sbob-${name}-path-root`,
-      prematch: "\\d:type=PATH msg=audit(\\d+): item=\\d+ name=",
-      comment: "PATH records (opens drift); workload scoping relies on Mode A exe-filtered audit rules",
-    },
-    {
-      name: `sbob-${name}-path-name`,
-      parent: `sbob-${name}-path-root`,
-      regex: 'name="(\\S+)"',
+      name: `sbob-${name}-path`,
+      parent: "auditd-generic",
+      regex: 'name="([^"\\s]+)"',
       order: "sbob.path",
+      comment:
+        "PATH record name= payload (opens drift); PATH lines carry no audit key, so the " +
+        "workload scope rides Mode A exe-filtered audit rules (TDS 4.2); paths with " +
+        "embedded spaces are not captured (honest limitation of the tail-join regex)",
     },
   ];
 }
@@ -195,6 +315,8 @@ export function auditDecoders(name: string, auditKeys: string[]): Decoder[] {
 /**
  * Section drift rules (base, drift, escalation, informational) for the Linux
  * variant band (TDS 6.1/6.2). Shared by the linux and k8s-node targets.
+ * Every auditd-facing rule anchors on the shipped 80700 parent (lab finding:
+ * root rules never fire for auditd-decoded events).
  */
 export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
   const name = ir.workload.name;
@@ -211,10 +333,11 @@ export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
     rules.push({
       id: base,
       level: 0,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.key", regex: `^sbob-exec(?:-${name})?$` }],
+      ifSid: AUDITD_ANCHOR_RULE,
+      fields: [{ name: "audit.key", regex: `^sbob-exec(?:-${name})?$` }],
       description: `SBoB base: exec event on sbob scope (${name})`,
       groups: [groups(["sbob-exec"])],
+      comment: `anchored on the shipped auditd rule ${AUDITD_ANCHOR_RULE} (root rules never fire for auditd events, lab finding); SYSCALL lines carry key= via the shipped decoders`,
     });
     rules.push({
       id: baseId,
@@ -229,25 +352,27 @@ export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
       level: 9,
       ifSid: baseId,
       fields: [],
-      description: `SBoB drift: process $(sbob.exe) not declared in execs[] of ${name} SBoB v${ir.workload.sbobVersion} (image ${ir.workload.imageID})`,
+      description: `SBoB drift: process $(audit.exe) not declared in execs[] of ${name} SBoB v${ir.workload.sbobVersion} (image ${ir.workload.imageID})`,
       groups: [groups(["sbob-drift", "process-execution"])],
       mitre: ["T1059"],
       options: ["no_full_log"],
+      comment: "audit.exe is decoded by the SHIPPED auditd-syscall chain (exe=\"…\" on SYSCALL lines)",
     };
     if (s.execs.exact.length > 0) {
-      drift.list = { field: "sbob.exe", lookup: "not_match_key", src: `sbob/${name}/execs` };
+      drift.list = { field: "audit.exe", lookup: "not_match_key", src: listSrc(name, "execs") };
     }
     const neg = negatedAlternation(s.execs.patterns);
-    if (neg !== null) drift.fields!.push({ name: "sbob.exe", regex: neg });
+    if (neg !== null) drift.fields!.push({ name: "audit.exe", regex: neg });
     rules.push(drift);
     rules.push({
       id: escId,
       level: 12,
-      ifSid: driftId,
+      ifMatchedSid: driftId,
       frequency: 8,
       timeframe: 120,
       description: `SBoB sustained drift: repeated undeclared process execution on ${name} (8 in 120s)`,
       groups: [groups(["sbob-drift", "process-execution", "sustained"])],
+      comment: "if_matched_sid correlation; frequency/timeframe are rule-element attributes (lab finding)",
     });
   } else {
     rules.push(sectionAbsentRule(ir, alloc, "execs", "sbob-exec", "process-execution"));
@@ -261,11 +386,14 @@ export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
     rules.push({
       id: baseId,
       level: 0,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.path", regex: "^/.+$" }],
+      ifSid: AUDITD_ANCHOR_RULE,
+      fields: [
+        { name: "audit.type", regex: "^PATH$" },
+        { name: "sbob.path", regex: "^/.+$" },
+      ],
       description: `SBoB base: PATH record observed (opens scope ${name})`,
       groups: [groups(["sbob-open"])],
-      comment: "matches type=PATH records; workload scoping via Mode A exe-filtered audit rules",
+      comment: "PATH lines carry NO audit key; the name= payload is decoded by the sbob tail-join child of the shipped auditd-generic",
     });
     const drift: XmlRule = {
       id: driftId,
@@ -279,7 +407,7 @@ export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
       comment: "path-level drift; flag-level (O_*) child rules are deferred per TDS 6.4",
     };
     if (s.opens.exact.length > 0) {
-      drift.list = { field: "sbob.path", lookup: "not_match_key", src: `sbob/${name}/opens` };
+      drift.list = { field: "sbob.path", lookup: "not_match_key", src: listSrc(name, "opens") };
     }
     const neg = negatedAlternation(s.opens.patterns);
     if (neg !== null) drift.fields!.push({ name: "sbob.path", regex: neg });
@@ -287,11 +415,12 @@ export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
     rules.push({
       id: escId,
       level: 12,
-      ifSid: driftId,
+      ifMatchedSid: driftId,
       frequency: 8,
       timeframe: 120,
       description: `SBoB sustained drift: repeated undeclared file opens on ${name} (8 in 120s)`,
       groups: [groups(["sbob-drift", "file-access", "sustained"])],
+      comment: "if_matched_sid correlation; frequency/timeframe are rule-element attributes (lab finding)",
     });
   } else {
     rules.push(sectionAbsentRule(ir, alloc, "opens", "sbob-open", "file-access"));
@@ -305,46 +434,47 @@ export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
     rules.push({
       id: baseId,
       level: 0,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.key", regex: `^sbob-connect(?:-${name})?$` }],
+      ifSid: AUDITD_ANCHOR_RULE,
+      fields: [{ name: "audit.type", regex: "^SOCKADDR$" }],
       description: `SBoB base: outbound connect observed (${name})`,
       groups: [groups(["sbob-connect"])],
+      comment: "SOCKADDR lines carry NO audit key; saddr= is decoded by the sbob tail-join child of the shipped auditd-generic",
     });
-    const allAddrs = s.egress.entries.flatMap((e) => e.addrEntries);
+    const model = egressAllowModel(ir);
     const anyIp = s.egress.entries.some((e) => e.anyIp);
     const hasDnsOnly = s.egress.entries.every((e) => e.addrEntries.length === 0 && !e.anyIp);
-    const ports = s.egress.entries.flatMap((e) => e.ports);
-    const portAlt = portAlternation(ports);
     const drift: XmlRule = {
       id: driftId,
       level: 9,
       ifSid: baseId,
       fields: [],
-      description: `SBoB drift: connect to $(sbob.dst_ip):$(sbob.dst_port) not declared in egress[] of ${name} SBoB v${ir.workload.sbobVersion}`,
+      description: `SBoB drift: connect to raw saddr $(sbob.saddr) not declared in egress[] of ${name} SBoB v${ir.workload.sbobVersion}`,
       groups: [groups(["sbob-drift", "egress-traffic"])],
       mitre: ["T1071"],
       options: ["no_full_log"],
       comment:
-        "fires when the saddr decoder (TDS 7.3.1) emits sbob.dst_ip/sbob.dst_port; " +
-        (hasDnsOnly ? "NOTE: DNS-only egress entries are not evaluable from auditd telemetry (TDS 8)" : "") +
-        (anyIp ? "NOTE: '*' any-IP entry present: address condition omitted per TDS 6.4" : ""),
+        "raw-hex saddr model (TDS 7.3.1): /32 (ip,port) pairs are exact CDB keys on sbob.saddr; " +
+        "wider CIDRs and any-port /32s evaluate as in-rule PCRE2 byte patterns. " +
+        (hasDnsOnly ? "NOTE: DNS-only egress entries are not evaluable from auditd telemetry (TDS 8). " : "") +
+        (anyIp ? "NOTE: '*' any-IP entry present: the address condition is omitted per TDS 6.4; port intent is not evaluable in the saddr model. " : "") +
+        (model.skippedIpv6.length > 0 ? `NOTE: IPv6 entries are not evaluable in the AF_INET hex model: ${model.skippedIpv6.join(", ")}. ` : ""),
     };
-    if (allAddrs.length > 0 && !anyIp) {
-      drift.list = { field: "sbob.dst_ip", lookup: "not_address_match_key", src: `sbob/${name}/egress_addrs` };
+    if (model.cdbKeys.length > 0) {
+      drift.list = { field: "sbob.saddr", lookup: "not_match_key", src: listSrc(name, "egress_addrs") };
     }
-    if (portAlt !== null && !anyIp) {
-      drift.fields!.push({ name: "sbob.dst_port", regex: `^(?!(?:${portAlt})$)` });
-    }
-    if ((allAddrs.length > 0 && !anyIp) || portAlt !== null) rules.push(drift);
-    if (rules.some((r) => r.id === driftId)) {
+    const neg = negatedAlternation(model.patterns);
+    if (neg !== null) drift.fields!.push({ name: "sbob.saddr", regex: neg });
+    if (model.cdbKeys.length > 0 || model.patterns.length > 0) {
+      rules.push(drift);
       rules.push({
         id: escId,
         level: 12,
-        ifSid: driftId,
+        ifMatchedSid: driftId,
         frequency: 8,
         timeframe: 120,
         description: `SBoB sustained drift: repeated undeclared egress on ${name} (8 in 120s)`,
         groups: [groups(["sbob-drift", "egress-traffic", "sustained"])],
+        comment: "if_matched_sid correlation; frequency/timeframe are rule-element attributes (lab finding)",
       });
     }
     if (hasDnsOnly) {
@@ -366,10 +496,11 @@ export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
     rules.push({
       id: infoId,
       level: 3,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.key", regex: `^sbob-accept(?:-${name})?$` }],
+      ifSid: AUDITD_ANCHOR_RULE,
+      fields: [{ name: "audit.key", regex: `^sbob-accept(?:-${name})?$` }],
       description: `SBoB informational: ingress[] declared for ${name} but Linux accept() telemetry cannot attribute peers; host-firewall ingestion required (TDS 8)`,
       groups: [groups(["sbob-info", "ingress-traffic"])],
+      comment: `anchored on the shipped auditd rule ${AUDITD_ANCHOR_RULE} (lab finding)`,
     });
   }
 
@@ -379,6 +510,11 @@ export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
 // ---------------------------------------------------------------------------
 // Linux bundle assembly
 // ---------------------------------------------------------------------------
+
+/** `<group name="sbob,<name>,">` wrapper for a rules XML body (wazuh container element). */
+export function groupWrapper(name: string, body: string): string {
+  return [`<group name="sbob,${name},">`, ...body.split("\n").map((l) => (l === "" ? "" : l)), "</group>"].join("\n");
+}
 
 export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
   const name = ir.workload.name;
@@ -393,30 +529,31 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
   // 2. CDB allowlists -----------------------------------------------------------
   for (const f of cdbListFiles(ir, name)) files.push(f);
 
-  // 3. decoder chain ------------------------------------------------------------
+  // 3. decoder file (auditd-generic tail-join) -------------------------------
   {
     const decoders = [...auditDecoders(name, auditKeys), configCheckDecoder(name)];
     const xml = [
-      xmlFileHeader(`sbob decoders for workload ${name} — routing on generated audit keys`, name, labNote(alloc)),
+      xmlFileHeader(`sbob decoders for workload ${name} — auditd-generic tail-join payloads`, name, labNote(alloc)),
       "",
       ...decoders.map(renderDecoder).join("\n\n").split("\n"),
       "",
     ].join("\n");
-    files.push({ path: `wazuh/decoders/sbob/${name}.xml`, content: xml });
+    files.push({ path: `wazuh/decoders/${name}.xml`, content: xml });
   }
 
   // 4. rules XML: section drift rules + signature pack (rulePolicies, M4) ----
   {
     const base = linuxSectionRules(ir, alloc);
     const rules = [...base, ...signatureRulesShared(ir, alloc, base), configCheckRule(ir, alloc, configDigest)];
+    const body = rules.map(renderRule).join("\n\n");
     const xml = [
       xmlFileHeader(`sbob drift + signature + ops rules for workload ${name} — Linux / k8s-node target`, name, labNote(alloc)),
       "",
-      ...rules.map(renderRule).join("\n\n").split("\n"),
+      groupWrapper(name, body),
       "",
     ].join("\n");
     files.push({
-      path: `wazuh/rules/sbob/${ID_BAND_BASE(alloc)}_${name}_linux.xml`,
+      path: `wazuh/rules/${ID_BAND_BASE(alloc)}_${name}_linux.xml`,
       content: xml,
     });
   }
@@ -444,6 +581,7 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
     if (problems.length > 0) {
       throw new Error(`coverage gate failed for workload ${name}: ${problems.join("; ")}`);
     }
+    const egressModel = egressAllowModel(ir);
     files.push({
       path: `${name}.manifest.json`,
       content:
@@ -456,7 +594,14 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
             bundleVersion: bundleVersion(ir),
             files: files.map((f) => f.path),
             coverage,
-            coverageNotes: [...ir.coverageNotes, ...signatureCoverageNotes(ir)],
+            coverageNotes: [
+              ...ir.coverageNotes,
+              ...signatureCoverageNotes(ir),
+              ...(egressModel.skippedIpv6.length > 0
+                ? [`linux: IPv6 egress entries are not evaluable in the AF_INET raw-hex saddr model: ${egressModel.skippedIpv6.join(", ")}`]
+                : []),
+              "linux: wazuh 4.14.6 engine model — auditd rules anchor on shipped rule 80700; SOCKADDR/PATH payloads ride the auditd-generic tail-join; egress evaluates raw saddr hex (TDS 7.3.1)",
+            ],
             labValidation: alloc.lab ? "validated" : "pending",
             ...(alloc.lab ? { labValidationEvidence: alloc.lab } : {}),
           },
@@ -482,10 +627,11 @@ function sectionAbsentRule(ir: IR, alloc: IdAllocator, section: string, key: str
   return {
     id: infoId,
     level: 2,
-    ifGroup: "auditd",
-    fields: [{ name: "sbob.key", regex: `^${key}(?:-${name})?$` }],
+    ifSid: AUDITD_ANCHOR_RULE,
+    fields: [{ name: "audit.key", regex: `^${key}(?:-${name})?$` }],
     description: `SBoB informational: section ${section}[] is absent from the ${name} SBoB; any event of this class is under-specified (spec 5.4 absent != NONE)`,
     groups: [["sbob", name, "sbob-info", group]],
+    comment: `anchored on the shipped auditd rule ${AUDITD_ANCHOR_RULE} (lab finding)`,
   };
 }
 

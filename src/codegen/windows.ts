@@ -5,7 +5,7 @@
  *   - wazuh/agent-conf/sbob/<name>.xml      eventchannel localfile fragment (TDS 4.3)
  *   - wazuh/lists/sbob/<name>/egress_addrs  CDB address allowlists (shared design
  *   - wazuh/lists/sbob/<name>/ingress_addrs   with the Linux bundle; manager-side)
- *   - wazuh/rules/sbob/<base>_<name>_windows.xml   base + drift + escalation rules
+ *   - wazuh/rules/<base>_<name>_windows.xml   base + drift + escalation rules
  *   - <name>.manifest.json                   workload bundle manifest + coverage notes
  *
  * Engine facts this codegen depends on (verified against wazuh/src/analysisd
@@ -33,6 +33,7 @@ import { compileDnsPattern, escapeRegExp, portAlternation } from "../wildcards.t
 import type { IdAllocator } from "../ruleids.ts";
 import type { ExecCompiled, IR } from "../types.ts";
 import type { BundleFile } from "./linux.ts";
+import { groupWrapper } from "./linux.ts";
 import { signatureCoverageNotes } from "./signatures.ts";
 import { bundleVersion } from "./opshealth.ts";
 import { buildCoverageMatrix, assertCoverageComplete } from "../coverage.ts";
@@ -157,7 +158,7 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       rules.push({
         id: escId,
         level: 12,
-        ifSid: driftId,
+        ifMatchedSid: driftId,
         frequency: 8,
         timeframe: 120,
         description: `SBoB sustained drift: repeated undeclared process execution on ${name} (8 in 120s)`,
@@ -228,7 +229,7 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       rules.push({
         id: escId,
         level: 12,
-        ifSid: driftId,
+        ifMatchedSid: driftId,
         frequency: 8,
         timeframe: 120,
         description: `SBoB sustained drift: repeated undeclared file creates on ${name} (8 in 120s)`,
@@ -283,7 +284,7 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
         rules.push({
           id: escId,
           level: 12,
-          ifSid: driftId,
+          ifMatchedSid: driftId,
           frequency: 8,
           timeframe: 120,
           description: `SBoB sustained drift: repeated undeclared egress on ${name} (8 in 120s)`,
@@ -363,14 +364,15 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       });
     }
 
+    const body = rules.map(renderRule).join("\n\n");
     const xml = [
       xmlFileHeader(`sbob drift rules for workload ${name} — Windows / Sysmon target`, name, labNote(alloc)),
       "",
-      ...rules.map(renderRule).join("\n\n").split("\n"),
+      groupWrapper(name, body),
       "",
     ].join("\n");
     files.push({
-      path: `wazuh/rules/sbob/${ID_BAND_BASE(alloc)}_${name}_windows.xml`,
+      path: `wazuh/rules/${ID_BAND_BASE(alloc)}_${name}_windows.xml`,
       content: xml,
     });
   }

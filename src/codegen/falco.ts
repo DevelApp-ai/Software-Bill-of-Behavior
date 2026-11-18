@@ -8,7 +8,7 @@
  *   wazuh/decoders/sbob/<name>-falco.md?   — no custom decoder: falco JSON is
  *                                           ingested natively (log_format json)
  *   wazuh/manager/sbob/<name>-falco.md     manager-side ingestion path doc
- *   wazuh/rules/sbob/<base>_<name>_falco.xml  (10,3) falco alert correlation
+ *   wazuh/rules/<base>_<name>_falco.xml (10,3) falco alert correlation
  *
  * Semantics: falco alerts on `spawned_process` / `open_*` / `connect` events
  * whose subject is NOT in the generated lists:
@@ -236,15 +236,20 @@ export function generateFalcoBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
       comment: "engines (10,3) falco alert correlation — hunt-time falco drift surfaced beside the auditd bundle",
     };
     files.push({
-      path: `wazuh/rules/sbob/${100000 + alloc.slot * 100}_${name}_falco.xml`,
+      path: `wazuh/rules/${100000 + alloc.slot * 100}_${name}_falco.xml`,
       content: [
         xmlFileHeader(
           `sbobctl generated falco correlation rule — workload: ${name}`,
           name,
-          `requires the falco JSON ingestion path (wazuh/manager/sbob/${name}-falco.md)`,
+          `ROOT RULE (honest caveat, wazuh 4.14.6 lab model): this rule evaluates falco JSON ingested per ` +
+          `wazuh/manager/sbob/${name}-falco.md through the shipped json decoder. The 80700 anchoring discipline ` +
+          `applies to auditd-decoded events only (root rules never fire for auditd events); root rules for ` +
+          `JSON-decoded events DO evaluate, provided no earlier loaded level-0 rule matches them`,
         ),
         "",
+        `<group name="sbob,${name},">`,
         renderRule(rule),
+        "</group>",
         "",
       ].join("\n"),
     });

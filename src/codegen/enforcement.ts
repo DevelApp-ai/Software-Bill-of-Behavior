@@ -150,15 +150,20 @@ export function enforceTelemetryRule(ir: IR, alloc: IdAllocator): BundleFile {
     comment: `enforcement (11,1) — requires the ${name}-enforce-localfile.xml ingestion (json format, TDS 14.6)`,
   };
   return {
-    path: `wazuh/rules/sbob/${100000 + alloc.slot * 100}_${name}_enforce.xml`,
+    path: `wazuh/rules/${100000 + alloc.slot * 100}_${name}_enforce.xml`,
     content: [
       xmlFileHeader(
         `sbobctl generated enforcement-telemetry rule — workload: ${name}`,
         name,
-        `fires on /var/ossec/logs/sbob-enforce.log (json localfile, ${name}-enforce-localfile.xml)`,
+        `fires on /var/ossec/logs/sbob-enforce.log (json localfile, ${name}-enforce-localfile.xml); ` +
+        `ROOT RULE (honest caveat, wazuh 4.14.6 lab model): the 80700 anchoring discipline applies to ` +
+        `auditd-decoded events only — root rules for JSON-decoded events DO evaluate, provided no earlier ` +
+        `loaded level-0 rule matches them`,
       ),
       "",
+      `<group name="sbob,${name},">`,
       renderRule(rule),
+      "</group>",
       "",
     ].join("\n"),
   };

@@ -6,7 +6,8 @@ export interface XmlRule {
   id: number;
   level: number;
   ifSid?: number;
-  ifGroup?: string;
+  /** Sustained-correlation parent (renders as <if_matched_sid>). */
+  ifMatchedSid?: number;
   match?: string;
   fields?: Array<{ name: string; regex: string }>;
   list?: { field: string; lookup: string; src: string };
@@ -30,9 +31,15 @@ function esc(s: string): string {
 export function renderRule(rule: XmlRule): string {
   const lines: string[] = [];
   if (rule.comment) lines.push(`  <!-- ${rule.comment} -->`);
-  lines.push(`  <rule id="${rule.id}" level="${rule.level}">`);
+  // Lab finding (wazuh 4.14.6): frequency/timeframe are RULE-ELEMENT
+  // ATTRIBUTES (Rules_OP_ReadRules reads them via w_check_attr), not child
+  // elements. Emitting them as children silently disables the correlation.
+  let open = `  <rule id="${rule.id}" level="${rule.level}"`;
+  if (rule.frequency !== undefined) open += ` frequency="${rule.frequency}"`;
+  if (rule.timeframe !== undefined) open += ` timeframe="${rule.timeframe}"`;
+  lines.push(open + ">");
   if (rule.ifSid !== undefined) lines.push(`    <if_sid>${rule.ifSid}</if_sid>`);
-  if (rule.ifGroup !== undefined) lines.push(`    <if_group>${esc(rule.ifGroup)}</if_group>`);
+  if (rule.ifMatchedSid !== undefined) lines.push(`    <if_matched_sid>${rule.ifMatchedSid}</if_matched_sid>`);
   if (rule.match !== undefined) lines.push(`    <match>${esc(rule.match)}</match>`);
   for (const f of rule.fields ?? []) {
     // Wazuh analysisd compiles <field> conditions with OS_Regex unless the
@@ -45,8 +52,6 @@ export function renderRule(rule: XmlRule): string {
   if (rule.list !== undefined) {
     lines.push(`    <list field="${esc(rule.list.field)}" lookup="${esc(rule.list.lookup)}">${esc(rule.list.src)}</list>`);
   }
-  if (rule.frequency !== undefined) lines.push(`    <frequency>${rule.frequency}</frequency>`);
-  if (rule.timeframe !== undefined) lines.push(`    <timeframe>${rule.timeframe}</timeframe>`);
   for (const g of rule.groups) lines.push(`    <group>${esc(g.join(","))}</group>`);
   for (const m of rule.mitre ?? []) lines.push(`    <mitre><id>${m}</id></mitre>`);
   for (const o of rule.options ?? []) lines.push(`    <options>${esc(o)}</options>`);

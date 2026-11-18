@@ -8,13 +8,13 @@
  *   - wazuh/audit/sbob/<name>.rules        Mode A exe-scoped audit keys
  *                                          (attribution tier 2, TDS 6.3)
  *   - wazuh/agent-conf/sbob/<name>-k8s.xml  docker-listener wodle (TDS 4.4)
- *   - wazuh/decoders/sbob/<name>-k8s.xml    audit chain + cgroup decoder
+ *   - wazuh/decoders/<name>-k8s.xml         auditd-generic tail-join + cgroup decoder
  *                                          (attribution tier 1, auditd >= 3.0)
  *   - wazuh/lists/sbob/<name>/*            CDB allowlists (shared design)
  *   - wazuh/lists/sbob/k8s/podmap         pod uid -> namespace/pod seed;
  *                                          runtime data, refreshed by
  *                                          scripts/sbob-podmap-refresh.sh
- *   - wazuh/rules/sbob/<base>_<name>_k8s-node.xml  drift rules (shared)
+ *   - wazuh/rules/<base>_<name>_k8s-node.xml  drift rules (shared)
  *                                          + attribution section (7x)
  *                                          + signature pack (rulePolicies, M4)
  *   - wazuh/manager/sbob/k8s-api-audit.md  API-server audit ingestion path
@@ -45,7 +45,7 @@ import type { IR } from "../types.ts";
 import type { Decoder, XmlRule } from "./xml.ts";
 import { renderDecoder, renderRule, xmlFileHeader } from "./xml.ts";
 import type { BundleFile } from "./linux.ts";
-import { auditDecoders, auditFragmentLines, cdbListFiles, linuxSectionRules } from "./linux.ts";
+import { AUDITD_ANCHOR_RULE, auditDecoders, auditFragmentLines, cdbListFiles, groupWrapper, listSrc, linuxSectionRules } from "./linux.ts";
 import { envoyIngestionDoc, envoyListFiles, envoyRules } from "./envoy.ts";
 import { signatureRulesK8s, signatureRulesShared, signatureCoverageNotes } from "./signatures.ts";
 import {
@@ -139,26 +139,26 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       {
         // cgroup v2/systemd — kubelet escapes uid dashes as underscores: pod<uid_underscores>.scope
         name: `sbob-${name}-audit-cgroup`,
-        parent: `sbob-${name}-audit-key`,
+        parent: "auditd-generic",
         regex: "cgroup=\\S*kubepods\\S*pod(\\w+)\\.scope\\S*",
         order: "sbob.pod_uid",
-        comment: cgroupDecoderComment,
+        comment: cgroupDecoderComment + " — tail-join child of the SHIPPED auditd-generic (the old custom sbob-audit-key chain was preempted by the shipped auditd root, lab finding)",
       },
       {
         // cgroup v2/systemd — dashes preserved: pod<uid_dashes>.scope
         name: `sbob-${name}-audit-cgroup-dash`,
-        parent: `sbob-${name}-audit-key`,
+        parent: "auditd-generic",
         regex: "cgroup=\\S*kubepods\\S*pod(\\w+-\\w+-\\w+-\\w+-\\w+)\\.scope\\S*",
         order: "sbob.pod_uid",
-        comment: cgroupDecoderComment,
+        comment: cgroupDecoderComment + " — tail-join child of the SHIPPED auditd-generic",
       },
       {
         // cgroup v1 — /kubepods/<qos>/pod<uid_dashes>/<container-id> (no .scope)
         name: `sbob-${name}-audit-cgroup-v1`,
-        parent: `sbob-${name}-audit-key`,
+        parent: "auditd-generic",
         regex: "cgroup=\\S*kubepods\\S*pod(\\w+-\\w+-\\w+-\\w+-\\w+)/\\S*",
         order: "sbob.pod_uid",
-        comment: cgroupDecoderComment,
+        comment: cgroupDecoderComment + " — tail-join child of the SHIPPED auditd-generic",
       },
     ];
     const xml = [
@@ -167,7 +167,7 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       ...decoders.map(renderDecoder).join("\n\n").split("\n"),
       "",
     ].join("\n");
-    files.push({ path: `wazuh/decoders/sbob/${name}-k8s.xml`, content: xml });
+    files.push({ path: `wazuh/decoders/${name}-k8s.xml`, content: xml });
   }
 
   // --------------------------------------------------------------------------
@@ -203,15 +203,27 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
     const groups = (extra: string[]) => ["sbob", name, ...extra];
 
     // (7,0) attribution base — cgroup-derived pod uid present (tier 1)
+    // LAB-INERT on stock wazuh 4.14.6 (honest finding, docs/lab-validation.yaml):
+    // the corpus SYSCALL lines carry no cgroup= field and the shipped decoder
+    // chain never reaches our cgroup children from the auditd-syscall tail, so
+    // sbob.pod_uid stays unset and this base never fires in the lab. Emitted
+    // anyway: production nodes with auditd >= 3.0 emit cgroup= on SYSCALL
+    // records and the chain becomes live (TDS 6.3 tier 1).
     const attrBaseId = alloc.linux("attribution", "base");
     rules.push({
       id: attrBaseId,
       level: 0,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.pod_uid", regex: "^[0-9a-f]{8}[-_][0-9a-f]{4}[-_][0-9a-f]{4}[-_][0-9a-f]{4}[-_][0-9a-f]{12}$" }],
+      ifSid: AUDITD_ANCHOR_RULE,
+      fields: [
+        { name: "audit.key", regex: "^sbob-" },
+        { name: "sbob.pod_uid", regex: "^[0-9a-f]{8}[-_][0-9a-f]{4}[-_][0-9a-f]{4}[-_][0-9a-f]{4}[-_][0-9a-f]{12}$" },
+      ],
       description: `SBoB attribution base: audit event carries a cgroup-derived pod uid (k8s node, ${name} scope)`,
       groups: [groups(["sbob-attribution"])],
-      comment: "drift alerts already carry sbob.pod_uid via the decoder; this chain asserts podmap resolution (TDS 6.3 tier 1)",
+      comment:
+        `anchored on the shipped auditd rule ${AUDITD_ANCHOR_RULE} (lab finding); ` +
+        "drift alerts already carry sbob.pod_uid via the decoder; this chain asserts podmap resolution (TDS 6.3 tier 1); " +
+        "LAB-INERT on stock 4.14.6 — see rule comment above",
     });
 
     // (7,1) podmap unresolved — uid not in podmap (stale refresh)
@@ -219,7 +231,7 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       id: alloc.linux("attribution", "drift"),
       level: 3,
       ifSid: attrBaseId,
-      list: { field: "sbob.pod_uid", lookup: "not_match_key", src: "sbob/k8s/podmap" },
+      list: { field: "sbob.pod_uid", lookup: "not_match_key", src: listSrc("k8s", "podmap") },
       fields: [],
       description: `SBoB attribution: pod uid $(sbob.pod_uid) NOT in the node podmap — run scripts/sbob-podmap-refresh.sh on the node (TDS 6.3 tier 1, stale map)`,
       groups: [groups(["sbob-attribution", "attribution-stale"])],
@@ -230,8 +242,8 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
     rules.push({
       id: alloc.linux("attribution", "info"),
       level: 3,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.key", regex: "^sbob-(?:exec|open|connect)$" }],
+      ifSid: AUDITD_ANCHOR_RULE,
+      fields: [{ name: "audit.key", regex: "^sbob-(?:exec|open|connect)$" }],
       description: `SBoB attribution: weak — node-scoped audit key (Mode B fallback); sbob.workload=unknown-node-scope, host-process collision possible (TDS 6.3 tier 3)`,
       groups: [groups(["sbob-attribution", "attribution-weak"])],
       comment: "only fires when the workload runs Mode B (no literal exes); Mode A keys carry identity implicitly",
@@ -266,14 +278,15 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
     // M6 endpoints[] section (TDS 13): L7 endpoint drift via envoy JSON (9,1)/(9,2)
     rules.push(...envoyRules(ir, alloc, name));
 
+    const body = rules.map(renderRule).join("\n\n");
     const xml = [
       xmlFileHeader(`sbob drift + attribution + signature + ops rules for workload ${name} — k8s-node target`, name, labNote(alloc)),
       "",
-      ...rules.map(renderRule).join("\n\n").split("\n"),
+      groupWrapper(name, body),
       "",
     ].join("\n");
     files.push({
-      path: `wazuh/rules/sbob/${100000 + alloc.slot * 100}_${name}_k8s-node.xml`,
+      path: `wazuh/rules/${100000 + alloc.slot * 100}_${name}_k8s-node.xml`,
       content: xml,
     });
   }

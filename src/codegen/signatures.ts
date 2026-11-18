@@ -41,6 +41,8 @@ import { SECTION_CODES } from "../ruleids.ts";
 import type { IR, RulePolicy } from "../types.ts";
 import type { XmlRule } from "./xml.ts";
 import type { BundleFile } from "./linux.ts";
+import { AUDITD_ANCHOR_RULE } from "./linux.ts";
+import { saddrCidrPattern } from "./saddr.ts";
 
 // ---------------------------------------------------------------------------
 // policy definitions
@@ -68,7 +70,7 @@ export const AUDIT_KEYED_POLICIES: SigPolicyDef[] = [
     level: 12,
     mitre: "T1547.006",
     groupTag: "sbob-sig-module-load",
-    description: (name) => `SBoB signature: kernel module load on ${name} scope (module-load policy, TDS 7.4) — comm $(sbob.comm), exe $(sbob.exe)`,
+    description: (name) => `SBoB signature: kernel module load on ${name} scope (module-load policy, TDS 7.4) — comm $(audit.command), exe $(audit.exe)`,
   },
   {
     name: "namespace-change",
@@ -77,7 +79,7 @@ export const AUDIT_KEYED_POLICIES: SigPolicyDef[] = [
     level: 10,
     mitre: "T1611",
     groupTag: "sbob-sig-namespace-change",
-    description: (name) => `SBoB signature: namespace change (unshare/setns) on ${name} scope (namespace-change policy, TDS 7.4) — comm $(sbob.comm), exe $(sbob.exe)`,
+    description: (name) => `SBoB signature: namespace change (unshare/setns) on ${name} scope (namespace-change policy, TDS 7.4) — comm $(audit.command), exe $(audit.exe)`,
   },
   {
     name: "process-tracing",
@@ -86,7 +88,7 @@ export const AUDIT_KEYED_POLICIES: SigPolicyDef[] = [
     level: 10,
     mitre: "T1055.008",
     groupTag: "sbob-sig-process-tracing",
-    description: (name) => `SBoB signature: ptrace on ${name} scope (process-tracing policy, TDS 7.4) — comm $(sbob.comm), exe $(sbob.exe)`,
+    description: (name) => `SBoB signature: ptrace on ${name} scope (process-tracing policy, TDS 7.4) — comm $(audit.command), exe $(audit.exe)`,
   },
   {
     name: "execution-from-memory",
@@ -95,7 +97,7 @@ export const AUDIT_KEYED_POLICIES: SigPolicyDef[] = [
     level: 10,
     mitre: "T1620",
     groupTag: "sbob-sig-execution-from-memory",
-    description: (name) => `SBoB signature: memfd_create (fileless execution) on ${name} scope (execution-from-memory policy, TDS 7.4) — comm $(sbob.comm), exe $(sbob.exe)`,
+    description: (name) => `SBoB signature: memfd_create (fileless execution) on ${name} scope (execution-from-memory policy, TDS 7.4) — comm $(audit.command), exe $(audit.exe)`,
   },
 ];
 
@@ -110,7 +112,17 @@ export const SA_TOKEN_PATH_REGEX = "^/var/run/secrets/kubernetes\\.io/serviceacc
  * Default kubeadm service CIDR 10.96.0.0/12 as a PCRE2 (the API server VIP
  * lives in it). Parameterizing the CIDR per cluster is an M5 deploy-repo knob.
  */
-export const K8S_SERVICE_CIDR_REGEX = "^10\\.(?:9[6-9]|10[0-9]|11[01])\\.[0-9]{1,3}\\.[0-9]{1,3}$";
+/**
+ * kubeadm default service CIDR 10.96.0.0/12 as a RAW-SADDR hex byte pattern
+ * (family 0200 + free port + 10. + enumerated 96-111 octet + free octets +
+ * zero padding) — the k8s API server VIP lives in it. Evaluated on sbob.saddr
+ * (the SOCKADDR payload decoded by the tail-join), NOT on a dotted IP: wazuh
+ * 4.14.6 never unpacks saddr, so the whole egress leg lives in the hex space
+ * (lab model, TDS 7.3.1). Any port matches (the VIP serves 443; self-hosted
+ * control planes use 6443). Parameterizing the CIDR per cluster is an M5
+ * deploy-repo knob.
+ */
+export const K8S_SERVICE_CIDR_REGEX = `^${saddrCidrPattern("10.96.0.0/12")}$`;
 
 // ---------------------------------------------------------------------------
 // rulePolicies helpers
@@ -131,7 +143,7 @@ export function exemptComms(ir: IR, policy: string): string[] {
 }
 
 export function exemptListPath(name: string, policy: string): string {
-  return `sbob/${name}/sigexempts/${policy}`;
+  return `etc/lists/sbob/${name}/sigexempts/${policy}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,19 +228,20 @@ export function signatureRulesShared(ir: IR, alloc: IdAllocator, emitted: XmlRul
     const rule: XmlRule = {
       id,
       level: p.level,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.key", regex: `^${p.auditKey}$` }],
+      ifSid: AUDITD_ANCHOR_RULE,
+      fields: [{ name: "audit.key", regex: `^${p.auditKey}$` }],
       description: p.description(name),
       groups: [groups(p.groupTag), ["sbob", name, "sbob-signature"]],
       mitre: [p.mitre],
       options: ["no_full_log"],
       comment:
+        `anchored on the shipped auditd rule ${AUDITD_ANCHOR_RULE} (root rules never fire for auditd events, lab finding); ` +
         "node-scoped key (Mode B): fires for any process; on k8s nodes the cgroup decoders stamp sbob.pod_uid " +
         "for attribution. Fires by default — exemptions via rulePolicies.processAllowed (TDS 6.2)",
     };
     const comms = exemptComms(ir, p.name);
     if (comms.length > 0) {
-      rule.list = { field: "sbob.comm", lookup: "not_match_key", src: exemptListPath(name, p.name) };
+      rule.list = { field: "audit.command", lookup: "not_match_key", src: exemptListPath(name, p.name) };
     }
     rules.push(rule);
   }
@@ -250,7 +263,7 @@ export function signatureRulesShared(ir: IR, alloc: IdAllocator, emitted: XmlRul
       };
       const comms = exemptComms(ir, "sensitive-file-access");
       if (comms.length > 0) {
-        rule.list = { field: "sbob.comm", lookup: "not_match_key", src: exemptListPath(name, "sensitive-file-access") };
+        rule.list = { field: "audit.command", lookup: "not_match_key", src: exemptListPath(name, "sensitive-file-access") };
       }
       rules.push(rule);
     }
@@ -268,7 +281,7 @@ export function signatureRulesShared(ir: IR, alloc: IdAllocator, emitted: XmlRul
       };
       const comms = exemptComms(ir, "service-account-token-access");
       if (comms.length > 0) {
-        rule.list = { field: "sbob.comm", lookup: "not_match_key", src: exemptListPath(name, "service-account-token-access") };
+        rule.list = { field: "audit.command", lookup: "not_match_key", src: exemptListPath(name, "service-account-token-access") };
       }
       rules.push(rule);
     }
@@ -281,8 +294,8 @@ export function signatureRulesShared(ir: IR, alloc: IdAllocator, emitted: XmlRul
       id: alloc.linux("base", "info"), // (0,3)
       level: 12,
       ifSid: egressDriftId,
-      fields: [{ name: "sbob.dst_ip", regex: K8S_SERVICE_CIDR_REGEX }],
-      description: `SBoB signature: undeclared connect into the k8s service CIDR $(sbob.dst_ip) (kubernetes-api-access policy, TDS 7.4)`,
+      fields: [{ name: "sbob.saddr", regex: K8S_SERVICE_CIDR_REGEX }],
+      description: `SBoB signature: undeclared connect into the k8s service CIDR (raw saddr $(sbob.saddr)) (kubernetes-api-access policy, TDS 7.4)`,
       groups: [groups("sbob-sig-kubernetes-api-access"), ["sbob", name, "sbob-signature", "egress-traffic"]],
       mitre: ["T1613"],
       options: ["no_full_log"],
@@ -319,8 +332,12 @@ export function signatureRulesK8s(ir: IR, alloc: IdAllocator, lifecycleRuleId: n
       mitre: ["T1552.001"],
       options: ["no_full_log"],
       comment:
-        "evaluates the k8s API server audit log (wazuh/manager/sbob/k8s-api-audit.md ingestion path; TDS 4.4) " +
-        "through the shipped json decoder; the connect-side overlay (0,3) covers the node egress footprint",
+        "ROOT RULE (honest caveat, wazuh 4.14.6 lab model): the 80700 anchoring discipline applies to " +
+        "auditd-decoded events only — this rule evaluates k8s API audit-log JSON ingested per " +
+        "wazuh/manager/sbob/k8s-api-audit.md (TDS 4.4) through the shipped json decoder, which the " +
+        "auditd root rule 80700 never matches. Root rules for JSON-decoded events DO evaluate, provided " +
+        "no earlier loaded level-0 rule matches them (lab: the shipped json parents route by log location). " +
+        "The connect-side overlay (0,3) covers the node egress footprint",
     });
   }
 
