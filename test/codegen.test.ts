@@ -130,9 +130,10 @@ test("rule XML: base/drift/sustained chain with correct ids and lookups", () => 
   assert.ok(xml.includes('<rule id="100011"'));
   assert.ok(xml.includes('lookup="not_match_key"'), "negated CDB lookup present");
   // opens drift: full-log negated-alternation match over the PATH name= field
-  // (raw XML escapes the inner quotes as &quot;)
+  // (quotes are emitted RAW in element text: the Wazuh loader does not decode
+  // entities, an escaped &quot; never matches a real double quote — issue #42)
   assert.ok(xml.includes('<rule id="100021"'));
-  assert.ok(xml.includes("name=&quot;(?!(?:/etc/resolv\\.conf|/data/[^/]+(?:/[^/]+)*))"), "negated allow-alternation present");
+  assert.ok(xml.includes("name=\"(?!(?:/etc/resolv\\.conf|/data/[^/]+(?:/[^/]+)*))"), "negated allow-alternation present");
   // egress drift: standalone shipped-root chain + raw AF_INET saddr negated fragments
   assert.ok(xml.includes('<rule id="100031"'));
   assert.match(xml, /<rule id="100030"[^>]*>\s*<if_sid>80700<\/if_sid>/);

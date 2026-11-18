@@ -72,6 +72,40 @@ LISTS="$BUNDLE/wazuh/lists"
 AGENTCONF="$BUNDLE/wazuh/agent-conf/sbob"
 ARBIN="$BUNDLE/wazuh/active-response/bin"
 
+# 0. rule-id collision check (issue #42 target hardening): the Wazuh linker
+#    keeps ONLY the first occurrence of a duplicated rule id (WARNING 7612),
+#    so a bundle rule whose id already exists in the manager is silently
+#    dropped. Fail loudly instead. Known trap: stock local_rules.xml ships an
+#    ACTIVE example rule id 100001, which collides with the slot-0 signature
+#    band (0,1) — remove the stock example before deploying a slot-0 SBoB.
+if [ -d "$RULES" ] && [ -d "$ROOT/etc/rules" ]; then
+  bundle_ids=$(grep -ho 'rule id="[0-9]*"' "$RULES"/*.xml 2>/dev/null | grep -o '[0-9]*' | sort -u)
+  if [ -n "$bundle_ids" ]; then
+    # destinations this sync rewrites are allowed to keep their own ids
+    dest_basenames=" "
+    for f in "$RULES"/*.xml; do
+      [ -e "$f" ] || continue
+      dest_basenames="$dest_basenames sbob_$(basename "$f") "
+    done
+    taken=""
+    for f in "$ROOT/etc/rules"/*.xml; do
+      [ -e "$f" ] || continue
+      case "$dest_basenames" in *" $(basename "$f") "* ) continue ;; esac
+      taken="$taken
+$(grep -ho 'rule id="[0-9]*"' "$f" 2>/dev/null | grep -o '[0-9]*')"
+    done
+    colliding=$(printf '%s\n%s\n' "$bundle_ids" "$taken" | sed 's/[[:space:]]//g' | grep -v '^$' | sort | uniq -d)
+    if [ -n "$colliding" ]; then
+      echo "ERROR: rule-id collision with rules already present under $ROOT/etc/rules:" >&2
+      echo "$colliding" | sed 's/^/  /' >&2
+      echo "The linker keeps only the first occurrence (WARNING 7612); the bundle copy" >&2
+      echo "would be silently dropped. Remove the conflicting rule (a stock install ships" >&2
+      echo "an ACTIVE example rule id 100001 in local_rules.xml) or use another slot." >&2
+      exit 1
+    fi
+  fi
+fi
+
 # 1. rules + decoders: etc/ layout, flattened (the loader does not recurse)
 if [ -d "$RULES" ]; then
   for f in "$RULES"/*.xml; do

@@ -51,8 +51,29 @@ export interface XmlRule {
   comment?: string;
 }
 
+/**
+ * Element-text escaping. Wazuh's rule loader does NOT decode XML entities in
+ * element text: an emitted `&quot;` inside a <match>/<field> body is treated
+ * as the literal 7 characters "amp;..."-style garbage and never matches a
+ * double quote in the log — proven live on wazuh-manager 4.14.6 (logtest
+ * bisect: the identical opens-drift pattern with &quot; never fired; with a
+ * raw `"` it fires — defect 10, issue #42). Quotes must therefore be emitted
+ * RAW (a raw `"` in element text is valid XML). `&` and `<` are still escaped
+ * because a raw one would break the XML parse; no sbob pattern or
+ * description legitimately contains them.
+ */
 function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+}
+
+/**
+ * Attribute-value escaping. Attribute values are double-quoted, so a `"`
+ * inside one must be escaped to keep the file well-formed (sbob attribute
+ * values are internal identifiers and never contain quotes today, but be
+ * correct anyway).
+ */
+function escAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 }
 
 export function renderRule(rule: XmlRule): string {
@@ -81,10 +102,10 @@ export function renderRule(rule: XmlRule): string {
     // -> w_check_attr_type; default EXP_TYPE_OSREGEX). Every sbobctl field
     // condition uses PCRE2 constructs (character classes, lookaheads), so the
     // attribute is mandatory: without it the ruleset fails to load.
-    lines.push(`    <field name="${esc(f.name)}" type="pcre2">${esc(f.regex)}</field>`);
+    lines.push(`    <field name="${escAttr(f.name)}" type="pcre2">${esc(f.regex)}</field>`);
   }
   if (rule.list !== undefined) {
-    lines.push(`    <list field="${esc(rule.list.field)}" lookup="${esc(rule.list.lookup)}">${esc(rule.list.src)}</list>`);
+    lines.push(`    <list field="${escAttr(rule.list.field)}" lookup="${escAttr(rule.list.lookup)}">${esc(rule.list.src)}</list>`);
   }
   for (const g of rule.groups) lines.push(`    <group>${esc(g.join(","))}</group>`);
   for (const m of rule.mitre ?? []) lines.push(`    <mitre><id>${m}</id></mitre>`);
@@ -160,7 +181,7 @@ export interface Decoder {
 export function renderDecoder(d: Decoder): string {
   const lines: string[] = [];
   if (d.comment) lines.push(`  <!-- ${d.comment} -->`);
-  lines.push(`  <decoder name="${esc(d.name)}">`);
+  lines.push(`  <decoder name="${escAttr(d.name)}">`);
   if (d.parent !== undefined) lines.push(`    <parent>${esc(d.parent)}</parent>`);
   if (d.prematch !== undefined) lines.push(`    <prematch>${esc(d.prematch)}</prematch>`);
   if (d.regex !== undefined) lines.push(`    <regex>${esc(d.regex)}</regex>`);

@@ -126,8 +126,26 @@ fi
 
 echo "== [$TARGET] drift corpus: expecting ${DRIFT_IDS[*]} =="
 cat "$DRIFT" | wazuh-logtest 2>&1 | tee /tmp/sbob-drift.out || true
+
+# Signature overlays chain via <if_sid> THROUGH their drift rule, so a fired
+# overlay is transitive proof the drift rule matched: Wazuh surfaces only the
+# deepest matching rule in the logtest output (and in the production alert) —
+# an original-classified event shows the overlay id, never the drift id
+# (issue #42 overlay semantics, proven live on 4.14.6).
+overlay_of() {
+  case "$1" in
+    100021) echo "100001" ;; # sensitive-file watchlist overlay (redis linux, /etc/shadow corpus event)
+    *) echo "" ;;
+  esac
+}
+
 for id in "${DRIFT_IDS[@]}"; do
   if ! grep -qE "^[[:space:]]*id: '$id'" /tmp/sbob-drift.out; then
+    ov="$(overlay_of "$id")"
+    if [ -n "$ov" ] && grep -qE "^[[:space:]]*id: '$ov'" /tmp/sbob-drift.out; then
+      echo "OK: rule $id fired (surfaced as its $ov signature overlay, which chains through it)"
+      continue
+    fi
     echo "FAIL: drift rule $id did not fire — see /tmp/sbob-drift.out" >&2
     case "$TARGET" in
       linux)

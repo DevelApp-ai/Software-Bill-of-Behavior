@@ -1,2 +1,2 @@
-# opens allowlist: key=path, value=flag bitmask (TDS 6.4); wildcard entries live in the rules XML
+# opens allowlist: declared-intent reference (key=path, value=flag bitmask, TDS 6.4); the drift rule evaluates opens via the rules XML full-log lookahead because the shipped decoder name= capture keeps literal quotes — CDB keys would never match (issue #42, TDS 7.3)
 /etc/resolv.conf:1

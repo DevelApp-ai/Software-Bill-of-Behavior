@@ -1,2 +1,2 @@
-# ingress CDB address list: key=ip/mask (canonicalized), value=identifier
+# ingress CDB address list: declared-intent reference (key=ip/mask canonicalized, value=identifier); the drift rule evaluates egress via precomputed raw-sockaddr hex REM fragments in the rules XML because srcip is a STATIC Wazuh field and cannot carry <field>/pcre2 conditions (issue #42, TDS 7.3.1)
 10.244.0.0/16:app-clients

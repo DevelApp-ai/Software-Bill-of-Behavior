@@ -428,7 +428,7 @@
     "rulePolicies: section-absent",
     "rulePolicies: section-absent — signature pack emitted with defaults (fire-by-default, no exemptions; TDS 7.4)",
     "signatures: audit keys are node-scoped (Mode B, attribution-weak) — declare processAllowed for container runtimes and node daemons (kubelet, containerd) to suppress expected noise",
-    "k8s: attribution tiers per TDS 6.3 — 1 cgroup+podmap (auditd >= 3.0), 2 Mode A exe-scoped keys (default), 3 weak fallback (attribution=weak)",
+    "k8s: attribution tiers per TDS 6.3 — tier 1 cgroup+podmap is PENDING (cgroup decoders dropped with the custom decoder chain, issue #42 defect 9; rule (7,0) is dormant until it lands), tier 2 Mode A exe-scoped keys (default), tier 3 weak fallback (attribution=weak)",
     "k8s: podmap (sbob/k8s/podmap) is node runtime data maintained by scripts/sbob-podmap-refresh.sh; not derived from the SBoB",
     "k8s: docker-listener lifecycle rule requires the shipped integration ruleset (parent rule 87900)",
     "k8s: DNS-name egress entries are not observable from node auditd telemetry — Windows agents detect them via Sysmon EID 22 (TDS 8)",
@@ -436,15 +436,5 @@
     "ops: config-check rule (8,3) compares the node digest from the command-wodle script against this bundle; multi-workload nodes see it fire on key-set differences (TDS 10.1)",
     "ops: sbob-cadence rule (8,1) alerts on digest mismatches between running containers and the pinned imageID; tag-only image references are not verifiable from docker events (TDS 10.3)"
   ],
-  "labValidation": "validated",
-  "labValidationEvidence": {
-    "targets": [
-      "linux",
-      "windows",
-      "k8s-node"
-    ],
-    "manager": "wazuh/wazuh-manager:4.14.6",
-    "date": "2026-10-29",
-    "evidence": "https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214"
-  }
+  "labValidation": "pending"
 }
