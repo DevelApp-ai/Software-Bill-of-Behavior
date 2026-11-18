@@ -37,7 +37,7 @@ import { signatureCoverageNotes } from "./signatures.ts";
 import { bundleVersion } from "./opshealth.ts";
 import { buildCoverageMatrix, assertCoverageComplete } from "../coverage.ts";
 import type { XmlRule } from "./xml.ts";
-import { renderRule, xmlFileHeader } from "./xml.ts";
+import { renderRulesFile, xmlFileHeader } from "./xml.ts";
 
 const LAB_NOTE_PENDING =
   "LAB VALIDATION PENDING (M2 exit criteria): replay scripts/logtest-corpus.sh corpus on a lab Windows host with Sysmon and a live wazuh manager";
@@ -363,15 +363,9 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       });
     }
 
-    const xml = [
-      xmlFileHeader(`sbob drift rules for workload ${name} — Windows / Sysmon target`, name, labNote(alloc)),
-      "",
-      ...rules.map(renderRule).join("\n\n").split("\n"),
-      "",
-    ].join("\n");
     files.push({
       path: `wazuh/rules/sbob/${ID_BAND_BASE(alloc)}_${name}_windows.xml`,
-      content: xml,
+      content: renderRulesFile(`sbob drift rules for workload ${name} — Windows / Sysmon target`, name, labNote(alloc), rules),
     });
   }
 

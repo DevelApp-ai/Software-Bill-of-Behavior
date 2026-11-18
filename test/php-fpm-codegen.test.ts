@@ -76,13 +76,19 @@ test("drift rules land on the slot-1 band: 100111/100121/100131 + sustained", ()
   assert.ok(xml.includes('<rule id="100110" level="0">'));
   // exec drift (CVE-2026-109618 in-worker RCE -> /bin/sh spawn)
   assert.ok(xml.includes('<rule id="100111" level="9">'));
-  assert.ok(xml.includes('<rule id="100112" level="12">'));
+  assert.ok(
+    xml.includes('<rule id="100112" level="12" frequency="8" timeframe="120">'),
+    "sustained rule carries frequency/timeframe as rule attributes (issue #42 defect 3)",
+  );
   // open drift (webshell drop to /var/tmp)
   assert.ok(xml.includes('<rule id="100121" level="9">'));
-  // connect drift (reverse shell / C2, CVE-2026-109619)
+  // connect drift (reverse shell / C2, CVE-2026-109619): raw AF_INET sockaddr
+  // negative lookahead (srcip is a static field — full-log pcre2, issue #42)
   assert.ok(xml.includes('<rule id="100131" level="9">'));
-  // port allowlist carries only the declared memcache port
-  assert.ok(xml.includes("^(?!(?:11211)$)"), "negated port alternation for 11211");
+  assert.ok(
+    xml.includes("saddr=(?!(?:02002BCB0A60640A0{16}))0200"),
+    "egress allowed (ip, port) pair precomputed as a raw sockaddr hex REM fragment",
+  );
   // signature pack at (6,x): 100160-100163 — memfd (fileless variant) included
   assert.ok(xml.includes('<rule id="100163" level="10">'));
   assert.ok(xml.match(/<rule id="100163"[\s\S]*?sbob-memfd/) !== null, "memfd signature keyed on sbob-memfd");
@@ -116,8 +122,10 @@ test("opens allowlist: web root + sessions wildcards live in the rule regex, res
   assert.ok(!opens.includes("/var/www"), "wildcarded web root is not a CDB entry");
   const xml = m.get("wazuh/rules/sbob/100100_php-fpm_linux.xml")!;
   assert.ok(
-    xml.includes("^(?!(?:/var/www/html/[^/]+(?:/[^/]+)*|/var/lib/php/sessions/[^/]+(?:/[^/]+)*)$)"),
-    "negated allow-alternation covers the web root and session dir",
+    xml.includes(
+      "name=\"(?!(?:/etc/resolv\\.conf|/var/www/html/[^/]+(?:/[^/]+)*|/var/lib/php/sessions/[^/]+(?:/[^/]+)*))",
+    ),
+    "negated full-log lookahead covers the web root, session dir and exact entries (shipped-decode model, issue #42)",
   );
 });
 

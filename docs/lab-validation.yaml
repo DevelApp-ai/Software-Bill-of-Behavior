@@ -14,14 +14,16 @@
 #   manager   pinned manager image the corpus was replayed against
 #   date      validation date (YYYY-MM-DD)
 #   evidence  Actions run URL of the green lab-validate matrix
-validations:
-  - workload: redis
-    targets: [linux, windows, k8s-node]
-    manager: wazuh/wazuh-manager:4.14.6
-    date: "2026-10-29"
-    evidence: https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214
-  - workload: php-fpm
-    targets: [linux]
-    manager: wazuh/wazuh-manager:4.14.6
-    date: "2026-10-29"
-    evidence: https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214
+#
+# RETRACTED (issue #42): the records committed against run 40931193214 were
+# VACUOUSLY green — the corpus and API detection gates piped through tee
+# without pipefail (tee always exits 0), and the analysisd running-status
+# grep `analysisd.*running` also matched "wazuh-analysisd not running...".
+# The 40931193214 run validated nothing about rule firing; with defect 10
+# (emitted &quot; in <match> text never matches a real double quote — the Wazuh
+# loader treats XML entities in element text as literal characters) every
+# opens-drift rule in those bundles was dead on arrival. The lane is hardened
+# (pipefail, anchored status grep, analysisd -t + duplicate-id gate, stock
+# local_rules.xml example-rule neutralization) and the bundle renderer fixed;
+# new evidence is only committed from a green run of the HARDENED lane.
+validations: []

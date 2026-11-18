@@ -4,20 +4,30 @@
 # Usage:
 #   scripts/sync-manager.sh <bundle-dir> [--root /var/ossec] [--dry-run]
 #
-# Mapping (bundle → manager):
-#   wazuh/rules/sbob/*.xml        → $ROOT/rules/sbob_<file>     (flattened — the Wazuh
-#                                                                   rules loader does not recurse)
-#   wazuh/decoders/sbob/*.xml     → $ROOT/decoders/sbob_<file>  (flattened)
-#   wazuh/lists/sbob/**           → $ROOT/lists/sbob/**         (paths kept — rule <list>
-#                                                                   src is lists-root-relative)
+# Mapping (bundle → manager), all under $ROOT/etc (the deb/package manager
+# layout — Wazuh 4.x reads rules/decoders from rule_dir/decoder_dir entries
+# in ossec.conf, which the stock ossec.conf declares as etc/rules and
+# etc/decoders; auto-glob happens for every *.xml dropped there):
+#   wazuh/rules/sbob/*.xml        → $ROOT/etc/rules/sbob_<file>    (flattened — the rules
+#                                                                    loader does not recurse subdirs)
+#   wazuh/decoders/sbob/*.xml     → $ROOT/etc/decoders/sbob_<file> (flattened)
+#   wazuh/lists/sbob/**           → $ROOT/etc/lists/sbob/**      (paths kept — rule <list>
+#                                                                    src is INSTALL_DIR-relative, i.e.
+#                                                                    etc/lists/sbob/...; *.cdb caches are
+#                                                                    skipped — analysisd compiles them)
 #   wazuh/agent-conf/sbob/<n>.xml → $ROOT/etc/shared/sbob-<n>/agent.conf
-#                                   (concatenated with <n>-k8s.xml when both exist;
-#                                   multiple wodle blocks are valid side-by-side)
+#                                    (concatenated with <n>-k8s.xml when both exist;
+#                                    multiple wodle blocks are valid side-by-side)
 #   wazuh/agent-conf/sbob/<n>-audit-digest.sh → $ROOT/etc/shared/sbob-<n>/
-#   wazuh/active-response/bin/*.sh → $ROOT/active-response/bin/ (M7 —
-#                                   manager copy = distribution source; the
-#                                   agent rollout is in runbook §9)
+#   wazuh/active-response/bin/*.sh → $ROOT/active-response/bin/  (M7 —
+#                                    manager copy = distribution source; the
+#                                    agent rollout is in runbook §9)
 #   wazuh/manager/**, manifests, checksums     → informational, not deployed
+#
+# CDB lists are the ONE thing auto-glob does not cover: every list referenced by
+# a rule <list> src also needs an explicit <list>etc/lists/sbob/...</list> entry
+# inside <ruleset> in ossec.conf (issue #42 defect 6 lists the original
+# wrong-layout copies that never loaded).
 #
 # The manager reloads rules/decoders/lists on restart (wazuh-control restart).
 # audit.rules fragments are NOT hot-deployable — nodes need the audit rollout
@@ -33,7 +43,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --root)   ROOT="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) if [ -n "$BUNDLE" ]; then echo "unexpected argument: $1" >&2; exit 2; fi
        BUNDLE="$1"; shift ;;
   esac
@@ -62,25 +72,60 @@ LISTS="$BUNDLE/wazuh/lists"
 AGENTCONF="$BUNDLE/wazuh/agent-conf/sbob"
 ARBIN="$BUNDLE/wazuh/active-response/bin"
 
-# 1. rules + decoders: flatten (the Wazuh loader does not recurse)
+# 0. rule-id collision check (issue #42 target hardening): the Wazuh linker
+#    keeps ONLY the first occurrence of a duplicated rule id (WARNING 7612),
+#    so a bundle rule whose id already exists in the manager is silently
+#    dropped. Fail loudly instead. Known trap: stock local_rules.xml ships an
+#    ACTIVE example rule id 100001, which collides with the slot-0 signature
+#    band (0,1) — remove the stock example before deploying a slot-0 SBoB.
+if [ -d "$RULES" ] && [ -d "$ROOT/etc/rules" ]; then
+  bundle_ids=$(grep -ho 'rule id="[0-9]*"' "$RULES"/*.xml 2>/dev/null | grep -o '[0-9]*' | sort -u)
+  if [ -n "$bundle_ids" ]; then
+    # destinations this sync rewrites are allowed to keep their own ids
+    dest_basenames=" "
+    for f in "$RULES"/*.xml; do
+      [ -e "$f" ] || continue
+      dest_basenames="$dest_basenames sbob_$(basename "$f") "
+    done
+    taken=""
+    for f in "$ROOT/etc/rules"/*.xml; do
+      [ -e "$f" ] || continue
+      case "$dest_basenames" in *" $(basename "$f") "* ) continue ;; esac
+      taken="$taken
+$(grep -ho 'rule id="[0-9]*"' "$f" 2>/dev/null | grep -o '[0-9]*')"
+    done
+    colliding=$(printf '%s\n%s\n' "$bundle_ids" "$taken" | sed 's/[[:space:]]//g' | grep -v '^$' | sort | uniq -d)
+    if [ -n "$colliding" ]; then
+      echo "ERROR: rule-id collision with rules already present under $ROOT/etc/rules:" >&2
+      echo "$colliding" | sed 's/^/  /' >&2
+      echo "The linker keeps only the first occurrence (WARNING 7612); the bundle copy" >&2
+      echo "would be silently dropped. Remove the conflicting rule (a stock install ships" >&2
+      echo "an ACTIVE example rule id 100001 in local_rules.xml) or use another slot." >&2
+      exit 1
+    fi
+  fi
+fi
+
+# 1. rules + decoders: etc/ layout, flattened (the loader does not recurse)
 if [ -d "$RULES" ]; then
   for f in "$RULES"/*.xml; do
     [ -e "$f" ] || continue
-    cp_deploy "$f" "$ROOT/rules/sbob_$(basename "$f")"
+    cp_deploy "$f" "$ROOT/etc/rules/sbob_$(basename "$f")"
   done
 fi
 if [ -d "$DECODERS" ]; then
   for f in "$DECODERS"/*.xml; do
     [ -e "$f" ] || continue
-    cp_deploy "$f" "$ROOT/decoders/sbob_$(basename "$f")"
+    cp_deploy "$f" "$ROOT/etc/decoders/sbob_$(basename "$f")"
   done
 fi
 
-# 2. CDB lists: keep relative paths (rule <list> src is lists-root-relative)
+# 2. CDB lists: keep relative paths under etc/lists (rule <list> src is
+#    INSTALL_DIR-relative); skip the analysisd-generated *.cdb caches
 if [ -d "$LISTS" ]; then
-  ( cd "$LISTS" && find sbob -type f 2>/dev/null ) | while IFS= read -r rel; do
+  ( cd "$LISTS" && find sbob -type f ! -name '*.cdb' 2>/dev/null ) | while IFS= read -r rel; do
     [ -n "$rel" ] || continue
-    cp_deploy "$LISTS/$rel" "$ROOT/lists/$rel"
+    cp_deploy "$LISTS/$rel" "$ROOT/etc/lists/$rel"
   done
 fi
 
@@ -129,7 +174,9 @@ fi
 
 # 4. post-sync hint
 echo ""
-echo "Done. Restart the manager to load rules/decoders/lists:  wazuh-control restart"
+echo "Done. Declare the CDB lists in ossec.conf <ruleset> (if not present):"
+echo "  <list>etc/lists/sbob/<name>/<list></list>   — CDB lists are NOT auto-globbed"
+echo "Restart the manager to load rules/decoders/lists:  wazuh-control restart"
 echo "Then bind each node's agent to the sbob-<name> group (agent.conf) and roll out"
 echo "the audit fragment per docs/runbook.md — audit rules are NOT hot-reloadable;"
 echo "rule (8,3) config-check fires until each node's key set matches the bundle."

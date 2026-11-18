@@ -1,3 +1,3 @@
-# execs allowlist (exact entries); wildcard entries live in the rules XML
+# execs allowlist (exact entries); exact-key CDB lookup on audit.exe; wildcard entries live in the rules XML — src is etc/lists-relative (issue #42 defect 6)
 /usr/bin/redis-server:1
 /bin/sh:1

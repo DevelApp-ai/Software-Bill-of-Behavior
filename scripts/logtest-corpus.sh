@@ -98,15 +98,15 @@ command -v wazuh-logtest >/dev/null 2>&1 || {
 }
 
 echo "== [$TARGET] benign corpus: expecting NO drift alerts =="
-cat "$BENIGN" | wazuh-logtest 2>/dev/null | tee /tmp/sbob-benign.out || true
+cat "$BENIGN" | wazuh-logtest 2>&1 | tee /tmp/sbob-benign.out || true
 for id in "${DRIFT_IDS[@]}"; do
-  if grep -q "Rule id: $id" /tmp/sbob-benign.out; then
+  if grep -qE "^[[:space:]]*id: '$id'" /tmp/sbob-benign.out; then
     echo "FAIL: benign corpus fired drift rule $id — see /tmp/sbob-benign.out" >&2
     case "$TARGET" in
       linux)
-        echo "      check decoder chain (sbob.key/exe/path/saddr fields) and CDB list loading" >&2 ;;
+        echo "      check the CDB list declarations in <ruleset> (saddr/key/exe arrive via the SHIPPED auditd decoder and the sbob rules chain under <if_sid>80700</if_sid> — a decoded_as-auditd root never fires after the shipped root matched)" >&2 ;;
       php)
-        echo "      check decoder chain (sbob.key/exe/path/saddr fields) and CDB list loading" >&2
+        echo "      check the CDB list declarations in <ruleset> (saddr/key/exe arrive via the SHIPPED auditd decoder and the sbob rules chain under <if_sid>80700</if_sid> — a decoded_as-auditd root never fires after the shipped root matched)" >&2
         echo "      (php-fpm bundle: slot 1 — rules 1001xx; see docs/php2shell-scenario.md)" >&2 ;;
       windows)
         echo "      check the shipped sysmon parent rule 61600 is loaded and the" >&2
@@ -120,20 +120,38 @@ for id in "${DRIFT_IDS[@]}"; do
 done
 echo "OK: benign corpus fired no drift rules"
 if [ "$TARGET" = "k8s" ]; then
-  grep -E 'Rule id: 1000(70|71|73|74)' /tmp/sbob-benign.out || true \
+  grep -E "^[[:space:]]*id: '1000(70|71|73|74)'" /tmp/sbob-benign.out || true \
     | sed 's/^/  (attribution info, allowed): /'
 fi
 
 echo "== [$TARGET] drift corpus: expecting ${DRIFT_IDS[*]} =="
-cat "$DRIFT" | wazuh-logtest 2>/dev/null | tee /tmp/sbob-drift.out || true
+cat "$DRIFT" | wazuh-logtest 2>&1 | tee /tmp/sbob-drift.out || true
+
+# Signature overlays chain via <if_sid> THROUGH their drift rule, so a fired
+# overlay is transitive proof the drift rule matched: Wazuh surfaces only the
+# deepest matching rule in the logtest output (and in the production alert) —
+# an original-classified event shows the overlay id, never the drift id
+# (issue #42 overlay semantics, proven live on 4.14.6).
+overlay_of() {
+  case "$1" in
+    100021) echo "100001" ;; # sensitive-file watchlist overlay (redis linux, /etc/shadow corpus event)
+    *) echo "" ;;
+  esac
+}
+
 for id in "${DRIFT_IDS[@]}"; do
-  if ! grep -q "Rule id: $id" /tmp/sbob-drift.out; then
+  if ! grep -qE "^[[:space:]]*id: '$id'" /tmp/sbob-drift.out; then
+    ov="$(overlay_of "$id")"
+    if [ -n "$ov" ] && grep -qE "^[[:space:]]*id: '$ov'" /tmp/sbob-drift.out; then
+      echo "OK: rule $id fired (surfaced as its $ov signature overlay, which chains through it)"
+      continue
+    fi
     echo "FAIL: drift rule $id did not fire — see /tmp/sbob-drift.out" >&2
     case "$TARGET" in
       linux)
-        echo "      check decoder chain (sbob.key/exe/path/saddr fields) and CDB list loading" >&2 ;;
+        echo "      check the CDB list declarations in <ruleset> (saddr/key/exe arrive via the SHIPPED auditd decoder and the sbob rules chain under <if_sid>80700</if_sid> — a decoded_as-auditd root never fires after the shipped root matched)" >&2 ;;
       php)
-        echo "      check decoder chain (sbob.key/exe/path/saddr fields) and CDB list loading" >&2
+        echo "      check the CDB list declarations in <ruleset> (saddr/key/exe arrive via the SHIPPED auditd decoder and the sbob rules chain under <if_sid>80700</if_sid> — a decoded_as-auditd root never fires after the shipped root matched)" >&2
         echo "      (php-fpm bundle: slot 1 — rules 1001xx; see docs/php2shell-scenario.md)" >&2 ;;
       windows)
         echo "      check the shipped sysmon parent rule 61600 is loaded and the" >&2
@@ -149,7 +167,7 @@ done
 
 if [ "$TARGET" = "k8s" ]; then
   echo "== [k8s] attribution check (informational — not a hard gate) =="
-  if grep -qE 'Rule id: 1000(70|71|73|74)' /tmp/sbob-drift.out; then
+  if grep -qE "^[[:space:]]*id: '1000(70|71|73|74)'" /tmp/sbob-drift.out; then
     echo "OK: attribution chain fired (see above). 100071 means the podmap does"
     echo "    not contain the corpus pod uid yet — run scripts/sbob-podmap-refresh.sh"
     echo "    (it emits both cgroup spellings), reload the manager, rerun and expect"
