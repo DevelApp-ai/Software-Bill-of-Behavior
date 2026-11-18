@@ -127,7 +127,12 @@ jobs:
           # wazuh-control restart can return non-zero for timing reasons; the real
           # gates below are the API probe + analysisd actually running with the bundle
           set -o pipefail
-          docker exec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control restart 2>&1 | tee restart.log \
+          # -w /var/ossec is NOT cosmetic: docker exec inherits the image WORKDIR (/),
+          # and restarted daemons resolve 'etc/ossec.conf' relative to their cwd —
+          # a restart from cwd / leaves analysisd's logtest module dead ("Invalid
+          # wazuh-logtest configuration", ERROR 7304) and kills wazuh-monitord
+          # (ERROR 1226) even though the rest of the manager appears healthy
+          docker exec -w /var/ossec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control restart 2>&1 | tee restart.log \
             || echo "wazuh-control restart rc=$? (continuing — the probe below is the gate)"
           for i in $(seq 1 60); do
             code=$(curl -sk -o /dev/null -w '%{http_code}' "$WAZUH_API" || true)
@@ -138,9 +143,11 @@ jobs:
             echo "manager API did not come back after the bundle install"
             exit 1
           fi
-          # anchored: "analysisd.*running" also matched "not running..." (vacuous
-          # green, the exact class of failure this lane exists to catch — issue #42)
-          if docker exec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control status 2>/dev/null | grep -qE "^wazuh-analysisd running"; then
+          # status prints "wazuh-analysisd is running..." / "wazuh-analysisd not
+          # running..." — the anchored grep must spell the "is": a bare
+          # "^wazuh-analysisd running" never matches, failing a healthy manager
+          # (the exact false red this run 44377976398 hit on all four targets)
+          if docker exec -w /var/ossec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control status 2>/dev/null | tee status.log | grep -qE "^wazuh-analysisd is running"; then
             echo "analysisd running with the bundle loaded"
             exit 0
           fi
@@ -157,10 +164,10 @@ jobs:
           # at deploy time; in the disposable lab manager the stock example is
           # neutralized (an EMPTY rules file loads clean on 4.14.6 — a
           # comment-only one errors with 'Group without any rule').
-          docker exec "$WAZUH_CONTAINER" sh -c ': > /var/ossec/etc/rules/local_rules.xml'
+          docker exec -w /var/ossec "$WAZUH_CONTAINER" sh -c ': > /var/ossec/etc/rules/local_rules.xml'
           # The config gate itself: analysisd -t must pass, and NO duplicate-id
           # warnings may appear (7612 = a bundle rule was silently dropped).
-          docker exec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-analysisd -t 2>&1 | tee analysisd-t.log \
+          docker exec -w /var/ossec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-analysisd -t 2>&1 | tee analysisd-t.log \
             || { echo "FAIL: analysisd -t rejected the ruleset (see analysisd-t.log)"; exit 1; }
           if grep -E "is duplicated" analysisd-t.log; then
             echo "FAIL: duplicate rule ids (WARNING 7612) — a bundle rule is silently dropped"
@@ -179,7 +186,7 @@ jobs:
           # runs INSIDE the container; script + corpora ride along with it
           docker cp test "$WAZUH_CONTAINER:/test"
           docker cp scripts "$WAZUH_CONTAINER:/sbob-scripts"
-          docker exec -e SBOB_TARGET="${{ matrix.target }}" "$WAZUH_CONTAINER" \
+          docker exec -e SBOB_TARGET="${{ matrix.target }}" -w /var/ossec "$WAZUH_CONTAINER" \
             bash -c 'PATH="/var/ossec/bin:$PATH" bash /sbob-scripts/logtest-corpus.sh "$SBOB_TARGET"' 2>&1 | tee corpus-gate.log
 
       - name: API detection gate (logtest API — JSON-asserted ids + sustained frequency children)
@@ -202,7 +209,7 @@ jobs:
             echo "--- ossec.log (tail 40) ---"
             docker exec "$WAZUH_CONTAINER" sh -c 'tail -40 /var/ossec/logs/ossec.log' 2>&1 || true
             echo "--- wazuh-control status ---"
-            docker exec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control status 2>&1 || true
+            docker exec -w /var/ossec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control status 2>&1 || true
             echo "--- api probe (curl -skv) ---"
             curl -skv "$WAZUH_API/" 2>&1 | tail -25 || true
             echo "--- corpus-gate.log (tail 60) ---"
@@ -212,7 +219,7 @@ jobs:
             echo "--- api-gate.log (tail 60) ---"
             tail -60 api-gate.log 2>&1 || true
             echo "--- corpus outputs inside the container ---"
-            docker exec "$WAZUH_CONTAINER" sh -c 'tail -30 /tmp/sbob-benign.out /tmp/sbob-drift.out' 2>&1 || true
+            docker exec "$WAZUH_CONTAINER" sh -c 'tail -n 30 /tmp/sbob-benign.out 2>&1; echo ---; tail -n 30 /tmp/sbob-drift.out 2>&1' 2>&1 || true
             echo '```'
           } > diag.md
           cat diag.md
@@ -234,6 +241,9 @@ jobs:
           fi
           if [ -s restart.log ]; then
             echo "::error::restart.log [${{ matrix.target }}]: $(tail -c 700 restart.log | tr '\n' '~')"
+          fi
+          if [ -s status.log ]; then
+            echo "::error::status.log [${{ matrix.target }}]: $(grep -i analysisd status.log | tr '\n' '~')"
           fi
           if [ -s analysisd-t.log ]; then
             echo "::error::analysisd-t.log [${{ matrix.target }}]: $(grep -v '(1103)' analysisd-t.log | tail -c 700 | tr '\n' '~')"
