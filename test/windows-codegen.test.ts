@@ -79,7 +79,7 @@ test("windows rules carry type=\"pcre2\" on every field condition (OS_Regex defa
 
 test("rule ids follow the TDS 6.1 layout; every if_sid resolves inside the file or to the shipped 61600 parent", () => {
   const xml = byPath(redisWindowsBundle().files).get("wazuh/rules/sbob/100000_redis_windows.xml")!;
-  const ids = [...xml.matchAll(/<rule id="(\d+)" level="(\d+)">/g)].map((m) => Number(m[1]));
+  const ids = [...xml.matchAll(/<rule id="(\d+)"[^>]*>/g)].map((m) => Number(m[1]));
   // 100000 + slot*100 + section*10 + variant (windows variants 5-9)
   assert.deepEqual(ids.sort((a, b) => a - b), [
     100005, 100006, 100007, 100008, // base section: global base, args drift, dns drift, prereq info
@@ -167,9 +167,9 @@ test("escalation rules repeat at 8 events / 120s and chain from their drift rule
   for (const [id, parent] of [[100017, 100016], [100027, 100026], [100037, 100036]] as const) {
     const block = ruleBlock(xml, id);
     assert.match(block, new RegExp(`<if_sid>${parent}</if_sid>`));
-    assert.match(block, /<frequency>8<\/frequency>/);
-    assert.match(block, /<timeframe>120<\/timeframe>/);
-    assert.match(xml, new RegExp(`<rule id="${id}" level="12">`));
+    // frequency/timeframe ship as attributes on the opening tag (issue #42 defect 3:
+    // element children of a frequency rule are ignored by the Wazuh linker)
+    assert.match(xml, new RegExp(`<rule id="${id}" level="12" frequency="8" timeframe="120">`));
   }
 });
 

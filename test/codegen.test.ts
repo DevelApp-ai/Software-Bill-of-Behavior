@@ -129,16 +129,17 @@ test("rule XML: base/drift/sustained chain with correct ids and lookups", () => 
   // execs drift: CDB not_match_key over the exact list
   assert.ok(xml.includes('<rule id="100011"'));
   assert.ok(xml.includes('lookup="not_match_key"'), "negated CDB lookup present");
-  // opens drift: negated-alternation regex for wildcarded /data/* + CDB for exact
+  // opens drift: full-log negated-alternation match over the PATH name= field
+  // (raw XML escapes the inner quotes as &quot;)
   assert.ok(xml.includes('<rule id="100021"'));
-  assert.ok(xml.includes("^(?!(?:/data/[^/]+(?:/[^/]+)*)$)"), "negated allow-alternation present");
-  // egress drift: negated port alternation + address list lookup
+  assert.ok(xml.includes("name=&quot;(?!(?:/etc/resolv\\.conf|/data/[^/]+(?:/[^/]+)*))"), "negated allow-alternation present");
+  // egress drift: standalone shipped-root chain + raw AF_INET saddr negated fragments
   assert.ok(xml.includes('<rule id="100031"'));
-  assert.ok(xml.includes("^(?!(?:53|443)$)"), "port allowlist alternation present");
-  assert.ok(xml.includes('lookup="not_address_match_key"'), "address CDB lookup present");
-  // sustained escalation children
+  assert.match(xml, /<rule id="100030"[^>]*>\s*<if_sid>80700<\/if_sid>/);
+  assert.ok(xml.includes("saddr=(?!(?:020000350A60000A0{16}|020001BBA200D9AB0{16}))0200"), "raw sockaddr fragments present");
+  // sustained escalation children chain via if_matched_sid + frequency/timeframe attributes
   assert.ok(xml.includes('<rule id="100012"'));
-  assert.ok(xml.includes("<frequency>8</frequency>"));
+  assert.ok(xml.includes('<rule id="100012" level="12" frequency="8" timeframe="120">'));
   // MITRE mapping
   assert.ok(xml.includes("T1059"));
   assert.ok(xml.includes("T1005"));
@@ -149,16 +150,17 @@ test("rule XML: base/drift/sustained chain with correct ids and lookups", () => 
   // generated-bundle banner
   assert.ok(xml.includes("LAB VALIDATION PENDING"));
   assert.ok(xml.includes("do not edit by hand"));
-  // description variables reference decoded fields
-  assert.ok(xml.includes("$(sbob.exe)"));
+  // description variables reference SHIPPED-decoded auditd fields (issue #42:
+  // auditd events ride the 0040-auditd_decoders.xml chain; no custom decoders)
+  assert.ok(xml.includes("$(audit.exe)"));
 });
 
-test("decoder XML: chains SYSCALL and PATH records into sbob.* fields", () => {
+test("decoder XML: config-check only; auditd rides the shipped decode chain", () => {
   const dec = byPath(redisBundle()).get("wazuh/decoders/sbob/redis.xml")!;
-  assert.ok(dec.includes("<decoder"), "has decoders");
-  assert.ok(dec.includes("sbob.key"));
-  assert.ok(dec.includes("sbob.exe"));
-  assert.ok(dec.includes("sbob.path"));
+  const decoders = [...dec.matchAll(/<decoder name="([^"]+)">/g)].map((m) => m[1]);
+  assert.deepEqual(decoders, ["sbob-redis-config-check"], "only the config-check decoder is emitted");
+  assert.ok(dec.includes("0040-auditd_decoders.xml"), "documents the shipped decode chain");
+  assert.doesNotMatch(dec, /<parent>/, "no decoder parent chains emitted");
   assert.ok(dec.includes("LAB VALIDATION PENDING"));
 });
 

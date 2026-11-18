@@ -56,11 +56,14 @@ test("attribution rules use the (7,x) band: 100070 base, 100071 unresolved, 1000
   const { files } = redisK8sBundle();
   const xml = byPath(files).get("wazuh/rules/sbob/100000_redis_k8s-node.xml")!;
   for (const id of [100070, 100071, 100073, 100074]) assert.ok(ruleBlock(xml, id), `rule ${id}`);
-  // base chains on auditd group + pod_uid field; unresolved chains via if_sid
-  assert.match(ruleBlock(xml, 100070), /<if_group>auditd<\/if_group>/);
+  // base chains on the shipped auditd root (80700) + pod_uid field; unresolved chains via if_sid
+  assert.match(ruleBlock(xml, 100070), /<if_sid>80700<\/if_sid>/);
   assert.match(ruleBlock(xml, 100070), /<field name="sbob\.pod_uid" type="pcre2">/);
   assert.match(ruleBlock(xml, 100071), /<if_sid>100070<\/if_sid>/);
-  assert.match(ruleBlock(xml, 100073), /<if_group>auditd<\/if_group>/);
+  assert.match(ruleBlock(xml, 100071), /<list field="sbob\.pod_uid" lookup="not_match_key">etc\/lists\/sbob\/k8s\/podmap<\/list>/);
+  // weak fallback weak-chains on the shipped auditd root + node-scoped audit key
+  assert.match(ruleBlock(xml, 100073), /<if_sid>80700<\/if_sid>/);
+  assert.match(ruleBlock(xml, 100073), /<field name="audit\.key" type="pcre2">\^sbob-\(\?:exec\|open\|connect\)\$/);
   // lifecycle chains off the shipped docker integration parent
   assert.match(ruleBlock(xml, 100074), new RegExp(`<if_sid>${DOCKER_PARENT_RULE}</if_sid>`));
 });
@@ -79,45 +82,18 @@ test("pod_uid field regex accepts real hex UUID pod uids (dash and underscore sp
   assert.ok(!re.test("0f3c8ed9-9d6b-4a1c-b5f2-7c1e0a9d1234 "), "trailing space rejected");
 });
 
-test("cgroup decoders: OS_Regex-safe syntax and semantic coverage of the three cgroup forms", () => {
+test("decoder file is config-check only: no custom audit decoders (issue #42 defect 9)", () => {
   const { files } = redisK8sBundle();
   const xml = byPath(files).get("wazuh/decoders/sbob/redis-k8s.xml")!;
-  const decoders = [...xml.matchAll(/<decoder name="(sbob-redis-audit-cgroup[^"]*)">([\s\S]*?)<\/decoder>/g)];
-  assert.equal(decoders.length, 3, "three sibling cgroup decoders");
-  for (const [, name, body] of decoders) {
-    assert.ok(/<parent>sbob-redis-audit-key<\/parent>/.test(body), `${name} chains on the audit-key parent`);
-    assert.ok(/<order>sbob\.pod_uid<\/order>/.test(body), `${name} extracts sbob.pod_uid`);
-    const regex = /<regex>(.*?)<\/regex>/.exec(body)![1];
-    // OS_Regex has no character classes, no {n,m}, no lookarounds
-    assert.ok(!/\[[^\]]/.test(regex), `${name}: no character classes`);
-    assert.ok(!/\{[0-9]/.test(regex), `${name}: no bounded quantifiers`);
-    assert.ok(!/\(\?<?[=!]/.test(regex), `${name}: no lookarounds`);
-  }
-  // semantic: translate OS_Regex \S / \w to JS and verify each cgroup form
-  const jsRegex = (osRegex: string) => new RegExp(osRegex.replace(/\\/g, "\\"));
-  const uid = "0f3c8ed9-9d6b-4a1c-b5f2-7c1e0a9d1234";
-  const underscore = uid.replace(/-/g, "_");
-  const v2Underscope = `cgroup=/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod${underscore}.scope/cri-containerd-53b1a3e2.scope`;
-  const v2DashScope = `cgroup=/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod${uid}.scope/cri-containerd-53b1a3e2.scope`;
-  const v1 = `cgroup=/kubepods/burstable/pod${uid}/53b1a3e2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9`;
-  const cgroupRegex = (suffix: string) => {
-    const body = decoders.find(([, name]) => name === `sbob-redis-audit-cgroup${suffix}`)![2];
-    return jsRegex(/<regex>(.*?)<\/regex>/.exec(body)![1]);
-  };
-  // underscore decoder must match the underscore form and capture the uid
-  const mU = cgroupRegex("").exec(v2Underscope);
-  assert.ok(mU, "underscore decoder matches v2 underscore path");
-  assert.equal(mU![1], underscore, "captures the full underscore uid");
-  // dash decoder must match the dash .scope form
-  const mD = cgroupRegex("-dash").exec(v2DashScope);
-  assert.ok(mD, "dash decoder matches v2 dash path");
-  assert.equal(mD![1], uid, "captures the full dash uid");
-  // v1 decoder must match the v1 path (no .scope)
-  const m1 = cgroupRegex("-v1").exec(v1);
-  assert.ok(m1, "v1 decoder matches cgroup v1 path");
-  assert.equal(m1![1], uid, "captures the full dash uid from v1 path");
-  // cross-form disjointness: underscore decoder must NOT swallow dash uids
-  assert.equal(cgroupRegex("").exec(v2DashScope), null, "underscore decoder rejects dash form");
+  // auditd events must ride the shipped 0040-auditd_decoders.xml chain; custom
+  // audit decoders lose root selection against shipped rule 80700
+  assert.doesNotMatch(xml, /sbob-redis-audit-cgroup/, "no cgroup decoders emitted");
+  assert.doesNotMatch(xml, /audit\.key/, "no audit-key decoder emitted");
+  assert.doesNotMatch(xml, /<parent>/, "no decoder parent chains emitted");
+  // only the config-check digest decoder remains, plus the pending rationale
+  const decoders = [...xml.matchAll(/<decoder name="([^"]+)">/g)].map((m) => m[1]);
+  assert.deepEqual(decoders, ["sbob-redis-config-check"]);
+  assert.match(xml, /0040-auditd_decoders\.xml/, "documents the shipped decode chain");
 });
 
 test("podmap seed is comment-only and documents both key spellings", () => {
