@@ -124,30 +124,48 @@ jobs:
 
       - name: Restart the manager and wait for the API (bundle must load cleanly)
         run: |
-          # wazuh-control restart can return non-zero for timing reasons; the real
-          # gates below are the API probe + analysisd actually running with the bundle
-          set -o pipefail
-          # -w /var/ossec is NOT cosmetic: docker exec inherits the image WORKDIR (/),
-          # and restarted daemons resolve 'etc/ossec.conf' relative to their cwd —
-          # a restart from cwd / leaves analysisd's logtest module dead ("Invalid
-          # wazuh-logtest configuration", ERROR 7304) and kills wazuh-monitord
-          # (ERROR 1226) even though the rest of the manager appears healthy
-          docker exec -w /var/ossec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control restart 2>&1 | tee restart.log \
-            || echo "wazuh-control restart rc=$? (continuing — the probe below is the gate)"
-          for i in $(seq 1 60); do
+          # restart via the container's own init path (docker restart), NOT via
+          # `docker exec wazuh-control restart`: wazuh-control starts daemons
+          # with cwd /var/ossec/bin (it does `cd \`dirname $0\``), and a daemon
+          # started there cannot resolve its own relative 'etc/ossec.conf' —
+          # analysisd logs ERROR 1226 + "Invalid wazuh-logtest configuration"
+          # (ERROR 7304, which kills the API logtest gate) and wazuh-monitord
+          # dies outright. The image's startup path has no such problem.
+          docker restart "$WAZUH_CONTAINER" >/dev/null
+          for i in $(seq 1 96); do
             code=$(curl -sk -o /dev/null -w '%{http_code}' "$WAZUH_API" || true)
-            if [ "$code" != "000" ] && [ -n "$code" ]; then echo "manager API up after restart (HTTP $code)"; break; fi
+            if [ "$code" != "000" ] && [ -n "$code" ]; then echo "manager API up after restart (HTTP $code after ~$((i*5))s)"; break; fi
+            if [ $((i % 12)) -eq 0 ]; then echo "...still waiting for the API (HTTP $code)"; fi
             sleep 5
           done
           if [ "$code" = "000" ] || [ -z "$code" ]; then
-            echo "manager API did not come back after the bundle install"
+            echo "manager API did not come back after the container restart"
             exit 1
           fi
-          # status prints "wazuh-analysisd is running..." / "wazuh-analysisd not
-          # running..." — the anchored grep must spell the "is": a bare
-          # "^wazuh-analysisd running" never matches, failing a healthy manager
-          # (the exact false red this run 44377976398 hit on all four targets)
-          if docker exec -w /var/ossec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control status 2>/dev/null | tee status.log | grep -qE "^wazuh-analysisd is running"; then
+          docker logs --tail 120 "$WAZUH_CONTAINER" > restart.log 2>&1 || true
+
+          # the install must survive the restart: if the image startup
+          # regenerated ossec.conf, the sbob <list> declarations are gone and
+          # the corpora would fire nothing (silent vacuous failure)
+          if [ -s sbob-lists.snippet ]; then
+            n=$(docker exec "$WAZUH_CONTAINER" sh -c 'grep -c "<list>etc/lists/sbob" /var/ossec/etc/ossec.conf || true' 2>/dev/null)
+            if ! [ "${n:-}" -ge 1 ] 2>/dev/null; then
+              echo "FAIL: sbob <list> declarations did not survive the container restart (ossec.conf was regenerated?)"
+              exit 1
+            fi
+            echo "sbob <list> declarations survived the restart ($n)"
+          else
+            echo "no CDB lists in this bundle — skipping the declaration check"
+          fi
+
+          # status gate: grep is the SOLE decider — wazuh-control status exits 1
+          # whenever ANY daemon is down (clusterd/dbd/csyslogd/... are routinely
+          # down in this image), so the pipeline must not inherit pipefail.
+          # status prints "wazuh-analysisd is running..." / "not running...":
+          # the anchor must spell the "is" (a bare "running" also matches
+          # "...is not running", and a bare "^...running" matches nothing).
+          docker exec -w /var/ossec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control status > status.log 2>&1 || true
+          if grep -qE "^wazuh-analysisd is running" status.log; then
             echo "analysisd running with the bundle loaded"
             exit 0
           fi
