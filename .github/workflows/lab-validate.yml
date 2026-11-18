@@ -183,6 +183,21 @@ jobs:
           # neutralized (an EMPTY rules file loads clean on 4.14.6 — a
           # comment-only one errors with 'Group without any rule').
           docker exec -w /var/ossec "$WAZUH_CONTAINER" sh -c ': > /var/ossec/etc/rules/local_rules.xml'
+          # restart analysisd with cwd /var/ossec: daemons started via
+          # wazuh-control inherit cwd /var/ossec/bin (wazuh-control does
+          # `cd \`dirname $0\``), and from there analysisd's logtest module
+          # cannot resolve its RELATIVE 'etc/ossec.conf' read — the module
+          # comes up invalid (ERROR 7304) and never serves the logtest socket,
+          # so both the wazuh-logtest binary ("error when connecting with
+          # wazuh-analysisd") and the API logtest gate fail while the daemon
+          # otherwise looks healthy (ERROR 1226 in ossec.log is the tell).
+          pid=$(docker exec "$WAZUH_CONTAINER" sh -c 'cat /var/ossec/var/run/wazuh-analysisd-*.pid 2>/dev/null | head -n 1')
+          if [ -n "$pid" ]; then
+            docker exec "$WAZUH_CONTAINER" sh -c "kill ${pid} 2>/dev/null" || true
+            sleep 3
+          fi
+          docker exec -d -w /var/ossec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-analysisd
+          sleep 8
           # The config gate itself: analysisd -t must pass, and NO duplicate-id
           # warnings may appear (7612 = a bundle rule was silently dropped).
           docker exec -w /var/ossec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-analysisd -t 2>&1 | tee analysisd-t.log \
@@ -228,6 +243,8 @@ jobs:
             docker exec "$WAZUH_CONTAINER" sh -c 'tail -40 /var/ossec/logs/ossec.log' 2>&1 || true
             echo "--- wazuh-control status ---"
             docker exec -w /var/ossec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control status 2>&1 || true
+            echo "--- queue sockets (logtest must exist) ---"
+            docker exec "$WAZUH_CONTAINER" sh -c 'ls -la /var/ossec/queue/ossec/ 2>&1' || true
             echo "--- api probe (curl -skv) ---"
             curl -skv "$WAZUH_API/" 2>&1 | tail -25 || true
             echo "--- corpus-gate.log (tail 60) ---"
