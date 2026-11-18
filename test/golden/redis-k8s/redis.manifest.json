@@ -26,12 +26,11 @@
     "wazuh/lists/sbob/redis/execs",
     "wazuh/lists/sbob/redis/opens",
     "wazuh/lists/sbob/redis/egress_addrs",
-    "wazuh/lists/sbob/redis/ingress_addrs",
     "wazuh/lists/sbob/k8s/podmap",
-    "wazuh/decoders/sbob/redis-k8s.xml",
+    "wazuh/decoders/redis-k8s.xml",
     "wazuh/agent-conf/sbob/redis-k8s.xml",
     "wazuh/agent-conf/sbob/redis-audit-digest.sh",
-    "wazuh/rules/sbob/100000_redis_k8s-node.xml",
+    "wazuh/rules/100000_redis_k8s-node.xml",
     "wazuh/manager/sbob/k8s-api-audit.md"
   ],
   "coverage": {
