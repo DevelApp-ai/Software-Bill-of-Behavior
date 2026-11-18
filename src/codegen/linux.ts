@@ -1,9 +1,15 @@
 /**
- * Linux / k8s-node codegen (TDS sections 4.2, 6.2, 6.4, 7.2).
+ * Linux / k8s-node codegen (TDS sections 4.2, 6.2, 6.4, 7.2), reworked for
+ * the SHIPPED Wazuh decoders (issue #42).
  *
  * Emits, per workload:
  *   - wazuh/audit/sbob/<name>.rules        auditctl fragment (Mode A preferred)
- *   - wazuh/decoders/sbob/<name>.xml       custom decoder chain (lab validation pending)
+ *   - wazuh/decoders/sbob/<name>.xml       config-check decoder ONLY (the old
+ *                                          custom auditd chain was dropped: a
+ *                                          custom decoder loses root selection
+ *                                          to the shipped auditd decoder chain,
+ *                                          so its fields never landed — issue
+ *                                          #42 defect 9, TDS 7.3 work item)
  *   - wazuh/lists/sbob/<name>/*            CDB allowlists (execs, opens, egress_addrs, ingress_addrs,
  *                                          sigexempts/<policy> for rulePolicies.processAllowed, M4)
  *   - wazuh/rules/sbob/<base>_<name>_linux.xml   drift rules + signature pack (rulePolicies, M4)
@@ -12,16 +18,32 @@
  *   - wazuh/agent-conf/sbob/<name>-audit-digest.sh   node-side digest script (M5)
  *   - <name>.manifest.json                 workload bundle manifest + coverage matrix (TDS 8)
  *
- * The audit fragment, CDB lists, decoder chain and section drift rules are
- * shared with the k8s-node target (TDS 6.3: k8s nodes run the Linux agent and
- * share the variant band) and are exported for src/codegen/k8s.ts to compose.
+ * Decode model (issue #42): all sbob conditions ride fields of the SHIPPED
+ * auditd decoders (0040-auditd_decoders.xml) plus the raw sockaddr hex it
+ * surfaces; no custom audit decoders are emitted. On wazuh-manager 4.14.6 the
+ * shipped decoder chain extracts:
+ *   - SYSCALL records   -> audit.command / audit.exe / audit.key / audit.type
+ *   - SOCKADDR records  -> srcip = raw saddr hex (via the generic unanchored
+ *                          addr=(\S+) regex; FRAGILE — depends on shipped
+ *                          decoder text, not a contract)
+ *   - PATH records      -> audit.directory.name (the generic name=(\S+)
+ *                          capture; keeps the literal quotes, no typed
+ *                          PATH decoder exists)
+ * Root-preemption constraint (verified live): every auditd-decoded event
+ * matches the shipped root 80700 ("Audit: Messages grouped.") and Wazuh stops
+ * evaluating further ROOT rules once an earlier root matched, so a user rule
+ * that is a `decoded_as auditd` root NEVER fires. All sbob auditd-keyed rules
+ * chain as <if_sid>80700</if_sid> children (AUDITD_ROOT_SID in xml.ts).
+ * The audit fragment, CDB lists and section drift rules are shared with the
+ * k8s-node target (TDS 6.3) and exported for src/codegen/k8s.ts to compose.
  */
-import { negatedAlternation, xmlEscape } from "../regexp.ts";
-import { portAlternation } from "../wildcards.ts";
+import { allowAlternation, negatedAlternation, xmlEscape } from "../regexp.ts";
+import { escapeRegExp } from "../wildcards.ts";
+import { saddrEntryFragments } from "./sockaddr.ts";
 import type { IdAllocator } from "../ruleids.ts";
 import type { IR } from "../types.ts";
 import type { Decoder, XmlRule } from "./xml.ts";
-import { renderDecoder, renderRule, xmlFileHeader } from "./xml.ts";
+import { AUDITD_ROOT_SID, renderDecoder, renderRulesFile, xmlFileHeader } from "./xml.ts";
 import { signatureAuditLines, signatureExemptListFiles, signatureRulesShared, signatureCoverageNotes } from "./signatures.ts";
 import {
   auditKeySetDigest,
@@ -40,6 +62,11 @@ export interface BundleFile {
 
 const LAB_NOTE_PENDING =
   "LAB VALIDATION PENDING (M1 exit criteria): run scripts/logtest-corpus.sh against a lab node with a live wazuh manager";
+
+/** CDB <list> src paths are etc/lists-relative on the manager (issue #42 defect 6). */
+export function listSrc(name: string, list: string): string {
+  return `etc/lists/sbob/${name}/${list}`;
+}
 
 /**
  * Banner line for generated XML headers (M1 exit criteria): LAB VALIDATED with
@@ -115,14 +142,16 @@ export function cdbListFiles(ir: IR, name: string): BundleFile[] {
   if (s.execs && s.execs.exact.length > 0) {
     files.push({
       path: `wazuh/lists/sbob/${name}/execs`,
-      content: CDB_HEADER("execs allowlist (exact entries); wildcard entries live in the rules XML") +
+      content:
+        CDB_HEADER("execs allowlist (exact entries); exact-key CDB lookup on audit.exe; wildcard entries live in the rules XML — src is etc/lists-relative (issue #42 defect 6)") +
         s.execs.exact.map((e) => `${e}:1`).join("\n") + "\n",
     });
   }
   if (s.opens && s.opens.exact.length > 0) {
     files.push({
       path: `wazuh/lists/sbob/${name}/opens`,
-      content: CDB_HEADER("opens allowlist: key=path, value=flag bitmask (TDS 6.4); wildcard entries live in the rules XML") +
+      content:
+        CDB_HEADER("opens allowlist: declared-intent reference (key=path, value=flag bitmask, TDS 6.4); the drift rule evaluates opens via the rules XML full-log lookahead because the shipped decoder name= capture keeps literal quotes — CDB keys would never match (issue #42, TDS 7.3)") +
         s.opens.entries
           .filter((e) => e.isExact)
           .map((e) => `${e.source.path}:${e.flagMask}`)
@@ -134,7 +163,8 @@ export function cdbListFiles(ir: IR, name: string): BundleFile[] {
     if (!sec || sec.exact.length === 0) continue;
     files.push({
       path: `wazuh/lists/sbob/${name}/${dir}_addrs`,
-      content: CDB_HEADER(`${dir} CDB address list: key=ip/mask (canonicalized), value=identifier`) +
+      content:
+        CDB_HEADER(`${dir} CDB address list: declared-intent reference (key=ip/mask canonicalized, value=identifier); the drift rule evaluates egress via precomputed raw-sockaddr hex REM fragments in the rules XML because srcip is a STATIC Wazuh field and cannot carry <field>/pcre2 conditions (issue #42, TDS 7.3.1)`) +
         sec.entries
           .flatMap((e) => e.addrEntries.map((a) => `${a}:${e.source.identifier ?? "unnamed"}`))
           .join("\n") + "\n",
@@ -145,56 +175,14 @@ export function cdbListFiles(ir: IR, name: string): BundleFile[] {
   return files;
 }
 
-/** Custom decoder chain for the workload's audit keys (TDS 7.3 work items). */
-export function auditDecoders(name: string, auditKeys: string[]): Decoder[] {
-  return [
-    {
-      name: `sbob-${name}-audit-root`,
-      prematch: "\\d:type=SYSCALL msg=audit(\\d+): arch=\\S+ syscall=\\S+ ",
-      comment: `root decoder for sbob-scoped audit events (${auditKeys.join(", ")})`,
-    },
-    {
-      name: `sbob-${name}-audit-key`,
-      parent: `sbob-${name}-audit-root`,
-      regex: 'key="(\\S+)"',
-      order: "sbob.key",
-    },
-    {
-      name: `sbob-${name}-audit-exe`,
-      parent: `sbob-${name}-audit-key`,
-      regex: 'exe="(\\S+)"',
-      order: "sbob.exe",
-    },
-    {
-      name: `sbob-${name}-audit-comm`,
-      parent: `sbob-${name}-audit-key`,
-      regex: 'comm="(\\S+)"',
-      order: "sbob.comm",
-    },
-    {
-      name: `sbob-${name}-audit-saddr`,
-      parent: `sbob-${name}-audit-key`,
-      regex: "saddr=(\\S+)",
-      order: "sbob.saddr",
-      comment: "raw sockaddr; hex AF_INET decode to sbob.dst_ip/sbob.dst_port is the saddr work item (TDS 7.3.1)",
-    },
-    {
-      name: `sbob-${name}-path-root`,
-      prematch: "\\d:type=PATH msg=audit(\\d+): item=\\d+ name=",
-      comment: "PATH records (opens drift); workload scoping relies on Mode A exe-filtered audit rules",
-    },
-    {
-      name: `sbob-${name}-path-name`,
-      parent: `sbob-${name}-path-root`,
-      regex: 'name="(\\S+)"',
-      order: "sbob.path",
-    },
-  ];
-}
-
 /**
  * Section drift rules (base, drift, escalation, informational) for the Linux
  * variant band (TDS 6.1/6.2). Shared by the linux and k8s-node targets.
+ *
+ * All conditions ride fields of the SHIPPED auditd decoder (+ the raw
+ * sockaddr hex it emits as srcip); no custom audit decoders are emitted, and
+ * every rule chains under the shipped auditd root AUDITD_ROOT_SID (80700) —
+ * root preemption, issue #42).
  */
 export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
   const name = ir.workload.name;
@@ -211,10 +199,11 @@ export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
     rules.push({
       id: base,
       level: 0,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.key", regex: `^sbob-exec(?:-${name})?$` }],
+      ifSid: AUDITD_ROOT_SID,
+      fields: [{ name: "audit.key", regex: `^sbob-exec(?:-${name})?$` }],
       description: `SBoB base: exec event on sbob scope (${name})`,
       groups: [groups(["sbob-exec"])],
+      comment: "chains under the shipped auditd root 80700 (root preemption — issue #42); audit.key comes from the shipped auditd decoder",
     });
     rules.push({
       id: baseId,
@@ -229,25 +218,29 @@ export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
       level: 9,
       ifSid: baseId,
       fields: [],
-      description: `SBoB drift: process $(sbob.exe) not declared in execs[] of ${name} SBoB v${ir.workload.sbobVersion} (image ${ir.workload.imageID})`,
+      description: `SBoB drift: process $(audit.exe) not declared in execs[] of ${name} SBoB v${ir.workload.sbobVersion} (image ${ir.workload.imageID})`,
       groups: [groups(["sbob-drift", "process-execution"])],
       mitre: ["T1059"],
       options: ["no_full_log"],
     };
     if (s.execs.exact.length > 0) {
-      drift.list = { field: "sbob.exe", lookup: "not_match_key", src: `sbob/${name}/execs` };
+      drift.list = { field: "audit.exe", lookup: "not_match_key", src: listSrc(name, "execs") };
     }
     const neg = negatedAlternation(s.execs.patterns);
-    if (neg !== null) drift.fields!.push({ name: "sbob.exe", regex: neg });
+    if (neg !== null) {
+      allowAlternation(s.execs.patterns); // enforce the TDS 7.1 regex budget
+      drift.fields!.push({ name: "audit.exe", regex: neg });
+    }
     rules.push(drift);
     rules.push({
       id: escId,
       level: 12,
-      ifSid: driftId,
+      ifMatchedSid: driftId,
       frequency: 8,
       timeframe: 120,
       description: `SBoB sustained drift: repeated undeclared process execution on ${name} (8 in 120s)`,
       groups: [groups(["sbob-drift", "process-execution", "sustained"])],
+      comment: "correlation rule: frequency/timeframe are rule attributes and the parent rides if_matched_sid (issue #42 defect 3)",
     });
   } else {
     rules.push(sectionAbsentRule(ir, alloc, "execs", "sbob-exec", "process-execution"));
@@ -261,37 +254,43 @@ export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
     rules.push({
       id: baseId,
       level: 0,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.path", regex: "^/.+$" }],
+      ifSid: AUDITD_ROOT_SID,
+      match: "^type=PATH msg=audit",
       description: `SBoB base: PATH record observed (opens scope ${name})`,
       groups: [groups(["sbob-open"])],
-      comment: "matches type=PATH records; workload scoping via Mode A exe-filtered audit rules",
+      comment:
+        "full-log anchor: the shipped decoder chain has no typed PATH decoder (the generic name= capture keeps literal quotes and lands in audit.directory.name), so the chain keys on the raw record — workload scoping relies on Mode A exe-filtered audit rules (issue #42 defect 9)",
     });
     const drift: XmlRule = {
       id: driftId,
       level: 9,
       ifSid: baseId,
-      fields: [],
-      description: `SBoB drift: file open $(sbob.path) not declared in opens[] of ${name} SBoB v${ir.workload.sbobVersion}`,
+      match: `name=".*`,
+      description: `SBoB drift: file open $(audit.directory.name) not declared in opens[] of ${name} SBoB v${ir.workload.sbobVersion}`,
       groups: [groups(["sbob-drift", "file-access"])],
       mitre: ["T1005"],
       options: ["no_full_log"],
-      comment: "path-level drift; flag-level (O_*) child rules are deferred per TDS 6.4",
+      comment:
+        "single full-log pcre2 negative lookahead on the quoted PATH name, covering exact and wildcard entries; decoded-field keying is unusable (PATH names carry literal quotes and audit.directory.name handling varies across shipped rulesets — issue #42)",
     };
-    if (s.opens.exact.length > 0) {
-      drift.list = { field: "sbob.path", lookup: "not_match_key", src: `sbob/${name}/opens` };
+    const openAlt = [
+      ...s.opens.exact.map((p) => escapeRegExp(p)),
+      ...s.opens.patterns,
+    ].join("|");
+    if (openAlt !== "") {
+      allowAlternation([openAlt]); // enforce the TDS 7.1 regex budget
+      drift.match = `name="(?!(?:${openAlt}))`;
     }
-    const neg = negatedAlternation(s.opens.patterns);
-    if (neg !== null) drift.fields!.push({ name: "sbob.path", regex: neg });
     rules.push(drift);
     rules.push({
       id: escId,
       level: 12,
-      ifSid: driftId,
+      ifMatchedSid: driftId,
       frequency: 8,
       timeframe: 120,
       description: `SBoB sustained drift: repeated undeclared file opens on ${name} (8 in 120s)`,
       groups: [groups(["sbob-drift", "file-access", "sustained"])],
+      comment: "correlation rule: frequency/timeframe are rule attributes and the parent rides if_matched_sid (issue #42 defect 3)",
     });
   } else {
     rules.push(sectionAbsentRule(ir, alloc, "opens", "sbob-open", "file-access"));
@@ -302,50 +301,48 @@ export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
     const baseId = alloc.linux("egress", "base");
     const driftId = alloc.linux("egress", "drift");
     const escId = alloc.linux("egress", "escalation");
+    const anyIp = s.egress.entries.some((e) => e.anyIp);
+    const hasDnsOnly = s.egress.entries.every((e) => e.addrEntries.length === 0 && !e.anyIp);
     rules.push({
       id: baseId,
       level: 0,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.key", regex: `^sbob-connect(?:-${name})?$` }],
+      ifSid: AUDITD_ROOT_SID,
+      fields: [{ name: "audit.key", regex: `^sbob-connect(?:-${name})?$` }],
       description: `SBoB base: outbound connect observed (${name})`,
       groups: [groups(["sbob-connect"])],
+      comment: "informational base on the SYSCALL record (shipped auditd decoder); the SOCKADDR half of the event carries srcip",
     });
-    const allAddrs = s.egress.entries.flatMap((e) => e.addrEntries);
-    const anyIp = s.egress.entries.some((e) => e.anyIp);
-    const hasDnsOnly = s.egress.entries.every((e) => e.addrEntries.length === 0 && !e.anyIp);
-    const ports = s.egress.entries.flatMap((e) => e.ports);
-    const portAlt = portAlternation(ports);
-    const drift: XmlRule = {
-      id: driftId,
-      level: 9,
-      ifSid: baseId,
-      fields: [],
-      description: `SBoB drift: connect to $(sbob.dst_ip):$(sbob.dst_port) not declared in egress[] of ${name} SBoB v${ir.workload.sbobVersion}`,
-      groups: [groups(["sbob-drift", "egress-traffic"])],
-      mitre: ["T1071"],
-      options: ["no_full_log"],
-      comment:
-        "fires when the saddr decoder (TDS 7.3.1) emits sbob.dst_ip/sbob.dst_port; " +
-        (hasDnsOnly ? "NOTE: DNS-only egress entries are not evaluable from auditd telemetry (TDS 8)" : "") +
-        (anyIp ? "NOTE: '*' any-IP entry present: address condition omitted per TDS 6.4" : ""),
-    };
-    if (allAddrs.length > 0 && !anyIp) {
-      drift.list = { field: "sbob.dst_ip", lookup: "not_address_match_key", src: `sbob/${name}/egress_addrs` };
-    }
-    if (portAlt !== null && !anyIp) {
-      drift.fields!.push({ name: "sbob.dst_port", regex: `^(?!(?:${portAlt})$)` });
-    }
-    if ((allAddrs.length > 0 && !anyIp) || portAlt !== null) rules.push(drift);
-    if (rules.some((r) => r.id === driftId)) {
-      rules.push({
-        id: escId,
-        level: 12,
-        ifSid: driftId,
-        frequency: 8,
-        timeframe: 120,
-        description: `SBoB sustained drift: repeated undeclared egress on ${name} (8 in 120s)`,
-        groups: [groups(["sbob-drift", "egress-traffic", "sustained"])],
-      });
+    if (!anyIp && !hasDnsOnly) {
+      // per-entry (ip, port) pairs precomputed into raw AF_INET sockaddrs
+      const egressFrags = s.egress.entries
+        .filter((e) => !e.anyIp && e.addrEntries.length > 0)
+        .flatMap((e) => saddrEntryFragments(e));
+      if (egressFrags.length > 0) {
+        allowAlternation(egressFrags); // enforce the TDS 7.1 regex budget
+        const drift: XmlRule = {
+          id: driftId,
+          level: 9,
+          ifSid: AUDITD_ROOT_SID,
+          match: `saddr=(?!(?:${egressFrags.join("|")}))0200`,
+          description: `SBoB drift: connect to raw AF_INET sockaddr $(srcip) not declared in egress[] of ${name} SBoB v${ir.workload.sbobVersion}`,
+          groups: [groups(["sbob-drift", "egress-traffic"])],
+          mitre: ["T1071"],
+          options: ["no_full_log"],
+          comment:
+            "standalone node-scoped SOCKADDR gate: srcip carries the raw sockaddr hex (family+port+addr+padding) via the shipped decoder's generic addr= regex, and srcip is a STATIC Wazuh field — <field>/pcre2 on it is rejected by the loader (\"Field 'srcip' is static\"), hence the full-log match with negative lookahead over the precomputed allowed (ip, port) hex forms. AF_UNIX/AF_NETLINK records (family != 0200) are excluded by the 0200 gate (issue #42, TDS 7.3.1)",
+        };
+        rules.push(drift);
+        rules.push({
+          id: escId,
+          level: 12,
+          ifMatchedSid: driftId,
+          frequency: 8,
+          timeframe: 120,
+          description: `SBoB sustained drift: repeated undeclared egress on ${name} (8 in 120s)`,
+          groups: [groups(["sbob-drift", "egress-traffic", "sustained"])],
+          comment: "correlation rule: frequency/timeframe are rule attributes and the parent rides if_matched_sid (issue #42 defect 3)",
+        });
+      }
     }
     if (hasDnsOnly) {
       rules.push({
@@ -366,8 +363,8 @@ export function linuxSectionRules(ir: IR, alloc: IdAllocator): XmlRule[] {
     rules.push({
       id: infoId,
       level: 3,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.key", regex: `^sbob-accept(?:-${name})?$` }],
+      ifSid: AUDITD_ROOT_SID,
+      fields: [{ name: "audit.key", regex: `^sbob-accept(?:-${name})?$` }],
       description: `SBoB informational: ingress[] declared for ${name} but Linux accept() telemetry cannot attribute peers; host-firewall ingestion required (TDS 8)`,
       groups: [groups(["sbob-info", "ingress-traffic"])],
     });
@@ -393,13 +390,18 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
   // 2. CDB allowlists -----------------------------------------------------------
   for (const f of cdbListFiles(ir, name)) files.push(f);
 
-  // 3. decoder chain ------------------------------------------------------------
+  // 3. decoder file: config-check decoder ONLY (the custom audit chain was
+  //    dropped — root-decoder selection preemption, issue #42 defect 9) ------
   {
-    const decoders = [...auditDecoders(name, auditKeys), configCheckDecoder(name)];
+    const decoder: Decoder = configCheckDecoder(name);
     const xml = [
-      xmlFileHeader(`sbob decoders for workload ${name} — routing on generated audit keys`, name, labNote(alloc)),
+      xmlFileHeader(
+        `sbob decoders for workload ${name} — config-check digest routing only`,
+        name,
+        `${labNote(alloc)}; auditd events ride the SHIPPED decoder chain (0040-auditd_decoders.xml) — custom audit decoders lose root selection and are not emitted (issue #42 defect 9); audit keys for reference: ${auditKeys.join(", ")}`,
+      ),
       "",
-      ...decoders.map(renderDecoder).join("\n\n").split("\n"),
+      ...renderDecoder(decoder).split("\n"),
       "",
     ].join("\n");
     files.push({ path: `wazuh/decoders/sbob/${name}.xml`, content: xml });
@@ -409,15 +411,14 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
   {
     const base = linuxSectionRules(ir, alloc);
     const rules = [...base, ...signatureRulesShared(ir, alloc, base), configCheckRule(ir, alloc, configDigest)];
-    const xml = [
-      xmlFileHeader(`sbob drift + signature + ops rules for workload ${name} — Linux / k8s-node target`, name, labNote(alloc)),
-      "",
-      ...rules.map(renderRule).join("\n\n").split("\n"),
-      "",
-    ].join("\n");
     files.push({
       path: `wazuh/rules/sbob/${ID_BAND_BASE(alloc)}_${name}_linux.xml`,
-      content: xml,
+      content: renderRulesFile(
+        `sbob drift + signature + ops rules for workload ${name} — Linux / k8s-node target`,
+        name,
+        labNote(alloc),
+        rules,
+      ),
     });
   }
 
@@ -456,7 +457,12 @@ export function generateLinuxBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
             bundleVersion: bundleVersion(ir),
             files: files.map((f) => f.path),
             coverage,
-            coverageNotes: [...ir.coverageNotes, ...signatureCoverageNotes(ir)],
+            coverageNotes: [
+              ...ir.coverageNotes,
+              ...signatureCoverageNotes(ir),
+              "wazuh decode model: auditd events ride the SHIPPED decoder chain; all sbob auditd-keyed rules chain under <if_sid>80700</if_sid> (a decoded_as-auditd user root never fires after the shipped root matched — issue #42)",
+              "srcip carries the raw AF_INET sockaddr hex via the shipped decoder's unanchored generic addr= regex (fragile, shipped-text dependent); it is a STATIC field and cannot carry <field>/pcre2 conditions — egress/sockaddr conditions use full-log pcre2 negative lookaheads (issue #42, TDS 7.3.1)",
+            ],
             labValidation: alloc.lab ? "validated" : "pending",
             ...(alloc.lab ? { labValidationEvidence: alloc.lab } : {}),
           },
@@ -482,8 +488,8 @@ function sectionAbsentRule(ir: IR, alloc: IdAllocator, section: string, key: str
   return {
     id: infoId,
     level: 2,
-    ifGroup: "auditd",
-    fields: [{ name: "sbob.key", regex: `^${key}(?:-${name})?$` }],
+    ifSid: AUDITD_ROOT_SID,
+    fields: [{ name: "audit.key", regex: `^${key}(?:-${name})?$` }],
     description: `SBoB informational: section ${section}[] is absent from the ${name} SBoB; any event of this class is under-specified (spec 5.4 absent != NONE)`,
     groups: [["sbob", name, "sbob-info", group]],
   };

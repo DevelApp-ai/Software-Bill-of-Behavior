@@ -20,7 +20,7 @@ import type { IR } from "../types.ts";
 import type { EnforceStateFile, EnforceSectionKey } from "../enforce.ts";
 import { effectiveState, sectionsInState } from "../enforce.ts";
 import type { BundleFile } from "./linux.ts";
-import { renderRule, xmlFileHeader } from "./xml.ts";
+import { renderRulesFile, xmlFileHeader } from "./xml.ts";
 import type { IdAllocator } from "../ruleids.ts";
 import { apparmorProfile, apparmorApplicable } from "./apparmor.ts";
 import { seccompProfile, seccompSystemdDropin } from "./seccomp.ts";
@@ -151,16 +151,12 @@ export function enforceTelemetryRule(ir: IR, alloc: IdAllocator): BundleFile {
   };
   return {
     path: `wazuh/rules/sbob/${100000 + alloc.slot * 100}_${name}_enforce.xml`,
-    content: [
-      xmlFileHeader(
-        `sbobctl generated enforcement-telemetry rule — workload: ${name}`,
-        name,
-        `fires on /var/ossec/logs/sbob-enforce.log (json localfile, ${name}-enforce-localfile.xml)`,
-      ),
-      "",
-      renderRule(rule),
-      "",
-    ].join("\n"),
+    content: renderRulesFile(
+      `sbobctl generated enforcement-telemetry rule — workload: ${name}`,
+      name,
+      `fires on /var/ossec/logs/sbob-enforce.log (json localfile, ${name}-enforce-localfile.xml)`,
+      [rule],
+    ),
   };
 }
 

@@ -39,6 +39,8 @@
 import type { IdAllocator } from "../ruleids.ts";
 import { SECTION_CODES } from "../ruleids.ts";
 import type { IR, RulePolicy } from "../types.ts";
+import { AUDITD_ROOT_SID } from "./xml.ts";
+import { saddrAllowedFragment } from "./sockaddr.ts";
 import type { XmlRule } from "./xml.ts";
 import type { BundleFile } from "./linux.ts";
 
@@ -68,7 +70,7 @@ export const AUDIT_KEYED_POLICIES: SigPolicyDef[] = [
     level: 12,
     mitre: "T1547.006",
     groupTag: "sbob-sig-module-load",
-    description: (name) => `SBoB signature: kernel module load on ${name} scope (module-load policy, TDS 7.4) — comm $(sbob.comm), exe $(sbob.exe)`,
+    description: (name) => `SBoB signature: kernel module load on ${name} scope (module-load policy, TDS 7.4) — comm $(audit.command), exe $(audit.exe)`,
   },
   {
     name: "namespace-change",
@@ -77,7 +79,7 @@ export const AUDIT_KEYED_POLICIES: SigPolicyDef[] = [
     level: 10,
     mitre: "T1611",
     groupTag: "sbob-sig-namespace-change",
-    description: (name) => `SBoB signature: namespace change (unshare/setns) on ${name} scope (namespace-change policy, TDS 7.4) — comm $(sbob.comm), exe $(sbob.exe)`,
+    description: (name) => `SBoB signature: namespace change (unshare/setns) on ${name} scope (namespace-change policy, TDS 7.4) — comm $(audit.command), exe $(audit.exe)`,
   },
   {
     name: "process-tracing",
@@ -86,7 +88,7 @@ export const AUDIT_KEYED_POLICIES: SigPolicyDef[] = [
     level: 10,
     mitre: "T1055.008",
     groupTag: "sbob-sig-process-tracing",
-    description: (name) => `SBoB signature: ptrace on ${name} scope (process-tracing policy, TDS 7.4) — comm $(sbob.comm), exe $(sbob.exe)`,
+    description: (name) => `SBoB signature: ptrace on ${name} scope (process-tracing policy, TDS 7.4) — comm $(audit.command), exe $(audit.exe)`,
   },
   {
     name: "execution-from-memory",
@@ -95,7 +97,7 @@ export const AUDIT_KEYED_POLICIES: SigPolicyDef[] = [
     level: 10,
     mitre: "T1620",
     groupTag: "sbob-sig-execution-from-memory",
-    description: (name) => `SBoB signature: memfd_create (fileless execution) on ${name} scope (execution-from-memory policy, TDS 7.4) — comm $(sbob.comm), exe $(sbob.exe)`,
+    description: (name) => `SBoB signature: memfd_create (fileless execution) on ${name} scope (execution-from-memory policy, TDS 7.4) — comm $(audit.command), exe $(audit.exe)`,
   },
 ];
 
@@ -107,10 +109,18 @@ export const SENSITIVE_PATH_REGEX =
 export const SA_TOKEN_PATH_REGEX = "^/var/run/secrets/kubernetes\\.io/serviceaccount/(?:token|ca\\.crt|namespace)$";
 
 /**
- * Default kubeadm service CIDR 10.96.0.0/12 as a PCRE2 (the API server VIP
- * lives in it). Parameterizing the CIDR per cluster is an M5 deploy-repo knob.
+ * Full-log pcre2 fragment matching a quoted PATH name against an anchored
+ * (^...$) path regex body. The shipped decoder chain has no typed PATH
+ * decoder: the generic name= capture keeps the literal quotes and lands in
+ * audit.directory.name, so decoded-field conditions on paths are unusable —
+ * conditions run on the raw `name="<path>"` record text instead (issue #42).
  */
-export const K8S_SERVICE_CIDR_REGEX = "^10\\.(?:9[6-9]|10[0-9]|11[01])\\.[0-9]{1,3}\\.[0-9]{1,3}$";
+export function rawPathPositive(pathRegex: string): string {
+  let body = pathRegex;
+  if (body.startsWith("^")) body = body.slice(1);
+  if (body.endsWith("$")) body = body.slice(0, -1);
+  return `name="(?:${body})"`;
+}
 
 // ---------------------------------------------------------------------------
 // rulePolicies helpers
@@ -130,8 +140,9 @@ export function exemptComms(ir: IR, policy: string): string[] {
   return policyFor(ir, policy)?.processAllowed ?? [];
 }
 
+/** CDB <list> src paths are etc/lists-relative on the manager (issue #42 defect 6). */
 export function exemptListPath(name: string, policy: string): string {
-  return `sbob/${name}/sigexempts/${policy}`;
+  return `etc/lists/sbob/${name}/sigexempts/${policy}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,19 +227,20 @@ export function signatureRulesShared(ir: IR, alloc: IdAllocator, emitted: XmlRul
     const rule: XmlRule = {
       id,
       level: p.level,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.key", regex: `^${p.auditKey}$` }],
+      ifSid: AUDITD_ROOT_SID,
+      fields: [{ name: "audit.key", regex: `^${p.auditKey}$` }],
       description: p.description(name),
       groups: [groups(p.groupTag), ["sbob", name, "sbob-signature"]],
       mitre: [p.mitre],
       options: ["no_full_log"],
       comment:
-        "node-scoped key (Mode B): fires for any process; on k8s nodes the cgroup decoders stamp sbob.pod_uid " +
-        "for attribution. Fires by default — exemptions via rulePolicies.processAllowed (TDS 6.2)",
+        "node-scoped key (Mode B): fires for any process. Chains under the shipped auditd root 80700 (root preemption — issue #42) and reads audit.key from the shipped auditd decoder. " +
+        "k8s pod attribution is PENDING (tier-1 cgroup decoding dropped with the custom decoder chain; TDS 6.3 work item). " +
+        "Fires by default — exemptions via rulePolicies.processAllowed (TDS 6.2)",
     };
     const comms = exemptComms(ir, p.name);
     if (comms.length > 0) {
-      rule.list = { field: "sbob.comm", lookup: "not_match_key", src: exemptListPath(name, p.name) };
+      rule.list = { field: "audit.command", lookup: "not_match_key", src: exemptListPath(name, p.name) };
     }
     rules.push(rule);
   }
@@ -241,16 +253,17 @@ export function signatureRulesShared(ir: IR, alloc: IdAllocator, emitted: XmlRul
         id: alloc.linux("base", "drift"), // (0,1)
         level: 12,
         ifSid: opensDriftId,
-        fields: [{ name: "sbob.path", regex: SENSITIVE_PATH_REGEX }],
-        description: `SBoB signature: sensitive file $(sbob.path) accessed (sensitive-file-access policy, TDS 7.4)`,
+        match: rawPathPositive(SENSITIVE_PATH_REGEX),
+        description: `SBoB signature: sensitive file $(audit.directory.name) accessed (sensitive-file-access policy, TDS 7.4)`,
         groups: [groups("sbob-sig-sensitive-file-access"), ["sbob", name, "sbob-signature", "file-access"]],
         mitre: ["T1552.001"],
         options: ["no_full_log"],
-        comment: "severity-raising overlay on the opens drift rule; watchlist per TDS 7.4",
+        comment:
+          "severity-raising overlay on the opens drift rule; full-log pcre2 on the quoted PATH name (the shipped decoder's generic name= capture keeps literal quotes, so decoded-field keying is unusable — issue #42); watchlist per TDS 7.4",
       };
       const comms = exemptComms(ir, "sensitive-file-access");
       if (comms.length > 0) {
-        rule.list = { field: "sbob.comm", lookup: "not_match_key", src: exemptListPath(name, "sensitive-file-access") };
+        rule.list = { field: "audit.command", lookup: "not_match_key", src: exemptListPath(name, "sensitive-file-access") };
       }
       rules.push(rule);
     }
@@ -259,16 +272,17 @@ export function signatureRulesShared(ir: IR, alloc: IdAllocator, emitted: XmlRul
         id: alloc.linux("base", "escalation"), // (0,2)
         level: 12,
         ifSid: opensDriftId,
-        fields: [{ name: "sbob.path", regex: SA_TOKEN_PATH_REGEX }],
-        description: `SBoB signature: service-account token material $(sbob.path) read (service-account-token-access policy, TDS 7.4)`,
+        match: rawPathPositive(SA_TOKEN_PATH_REGEX),
+        description: `SBoB signature: service-account token material $(audit.directory.name) read (service-account-token-access policy, TDS 7.4)`,
         groups: [groups("sbob-sig-sa-token-access"), ["sbob", name, "sbob-signature", "credential-access"]],
         mitre: ["T1552.001"],
         options: ["no_full_log"],
-        comment: "k8s projected SA volume; chain with kubernetes-api-access alerts for credential misuse (TDS 7.4)",
+        comment:
+          "k8s projected SA volume; full-log pcre2 on the quoted PATH name (literal-quote decode caveat, issue #42); chain with kubernetes-api-access alerts for credential misuse (TDS 7.4)",
       };
       const comms = exemptComms(ir, "service-account-token-access");
       if (comms.length > 0) {
-        rule.list = { field: "sbob.comm", lookup: "not_match_key", src: exemptListPath(name, "service-account-token-access") };
+        rule.list = { field: "audit.command", lookup: "not_match_key", src: exemptListPath(name, "service-account-token-access") };
       }
       rules.push(rule);
     }
@@ -277,17 +291,22 @@ export function signatureRulesShared(ir: IR, alloc: IdAllocator, emitted: XmlRul
   // (0,3): egress-drift overlay (kubernetes API connect) ----------------------
   const egressDriftId = rawId(alloc, SECTION_CODES.egress, 1);
   if (has(egressDriftId) && !policySuppressed(ir, "kubernetes-api-access")) {
+    // default kubeadm service CIDR 10.96.0.0/12 (API server VIP) as a raw
+    // AF_INET sockaddr REM: ANY port, fixed nybbles 0A6 + 5 free address
+    // nybbles (srcip is a STATIC field — full-log pcre2 over the raw record,
+    // issue #42, TDS 7.3.1)
+    const cidrFragment = saddrAllowedFragment("10.96.0.0", 12, null)!;
     rules.push({
       id: alloc.linux("base", "info"), // (0,3)
       level: 12,
       ifSid: egressDriftId,
-      fields: [{ name: "sbob.dst_ip", regex: K8S_SERVICE_CIDR_REGEX }],
-      description: `SBoB signature: undeclared connect into the k8s service CIDR $(sbob.dst_ip) (kubernetes-api-access policy, TDS 7.4)`,
+      match: `saddr=${cidrFragment}`,
+      description: `SBoB signature: undeclared connect into the k8s service CIDR via raw sockaddr $(srcip) (kubernetes-api-access policy, TDS 7.4)`,
       groups: [groups("sbob-sig-kubernetes-api-access"), ["sbob", name, "sbob-signature", "egress-traffic"]],
       mitre: ["T1613"],
       options: ["no_full_log"],
       comment:
-        "default kubeadm service CIDR 10.96.0.0/12 (API server VIP); cluster-specific CIDR is an M5 deploy-repo knob. " +
+        "default kubeadm service CIDR 10.96.0.0/12 (API server VIP), any port; cluster-specific CIDR is an M5 deploy-repo knob. " +
         "Manager-side k8s audit-log rule for this policy lands with the k8s-node target (TDS 4.4)",
     });
   }
