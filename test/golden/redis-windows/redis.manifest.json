@@ -25,7 +25,7 @@
     "wazuh/agent-conf/sbob/redis.xml",
     "wazuh/lists/sbob/redis/egress_addrs",
     "wazuh/lists/sbob/redis/ingress_addrs",
-    "wazuh/rules/sbob/100000_redis_windows.xml"
+    "wazuh/rules/100000_redis_windows.xml"
   ],
   "coverage": {
     "workload": "redis",

@@ -26,9 +26,8 @@
     "wazuh/lists/sbob/redis/execs",
     "wazuh/lists/sbob/redis/opens",
     "wazuh/lists/sbob/redis/egress_addrs",
-    "wazuh/lists/sbob/redis/ingress_addrs",
-    "wazuh/decoders/sbob/redis.xml",
-    "wazuh/rules/sbob/100000_redis_linux.xml",
+    "wazuh/decoders/redis.xml",
+    "wazuh/rules/100000_redis_linux.xml",
     "wazuh/agent-conf/sbob/redis.xml",
     "wazuh/agent-conf/sbob/redis-audit-digest.sh"
   ],
@@ -425,7 +424,8 @@
     "capabilities: section-absent",
     "rulePolicies: section-absent",
     "rulePolicies: section-absent — signature pack emitted with defaults (fire-by-default, no exemptions; TDS 7.4)",
-    "signatures: audit keys are node-scoped (Mode B, attribution-weak) — declare processAllowed for container runtimes and node daemons (kubelet, containerd) to suppress expected noise"
+    "signatures: audit keys are node-scoped (Mode B, attribution-weak) — declare processAllowed for container runtimes and node daemons (kubelet, containerd) to suppress expected noise",
+    "linux: wazuh 4.14.6 engine model — auditd rules anchor on shipped rule 80700; SOCKADDR/PATH payloads ride the auditd-generic tail-join; egress evaluates raw saddr hex (TDS 7.3.1)"
   ],
   "labValidation": "validated",
   "labValidationEvidence": {

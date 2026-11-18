@@ -1,3 +1,7 @@
-# egress CDB address list: key=ip/mask (canonicalized), value=identifier
-10.96.0.10/32:cluster-dns
-162.0.217.171/32:stripe-api
+# sbob egress CDB address list: key = raw auditd saddr hex (AF_INET:
+#   family 0200 + port (4 hex BE) + ip (8 hex BE) + zero padding), UPPERCASE
+#   — matches the SOCKADDR record byte-for-byte; CDB is exact-match and
+#   case-sensitive (wazuh 4.14.6 lab model, TDS 7.3.1).
+# value = identifier. Workload: redis.
+020000350A60000A0000000000000000:cluster-dns
+020001BBA200D9AB0000000000000000:stripe-api
