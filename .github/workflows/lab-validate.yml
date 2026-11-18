@@ -72,53 +72,6 @@ jobs:
           echo "manager API did not come up"
           exit 1
 
-      - name: Post manager diagnostics to the PR (failure path)
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          {
-            echo "## lab-validate diagnostics — target \`${{ matrix.target }}\`"
-            echo '```'
-            echo "--- docker ps -a ---"; docker ps -a 2>&1 || true
-            echo "--- docker logs (tail 150) ---"; docker logs --tail 150 "$WAZUH_CONTAINER" 2>&1 || true
-            echo "--- ossec.log (tail 40) ---"
-            docker exec "$WAZUH_CONTAINER" sh -c 'tail -40 /var/ossec/logs/ossec.log' 2>&1 || true
-            echo "--- wazuh-control status ---"
-            docker exec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control status 2>&1 || true
-            echo "--- api probe (curl -skv) ---"
-            curl -skv "$WAZUH_API/" 2>&1 | tail -25 || true
-            echo "--- corpus-gate.log (tail 60) ---"
-            tail -60 corpus-gate.log 2>&1 || true
-            echo "--- analysisd-t.log (tail 30) ---"
-            tail -30 analysisd-t.log 2>&1 || true
-            echo "--- api-gate.log (tail 60) ---"
-            tail -60 api-gate.log 2>&1 || true
-            echo "--- corpus outputs inside the container ---"
-            docker exec "$WAZUH_CONTAINER" sh -c 'tail -30 /tmp/sbob-benign.out /tmp/sbob-drift.out' 2>&1 || true
-            echo '```'
-          } > diag.md
-          cat diag.md
-          # readback channel 1: PR comment via the REST API (status visible in annotations)
-          if [ -n "${PR_NUMBER:-}" ]; then
-            jq -n --rawfile body diag.md '{body: $body}' > payload.json
-            pcode=$(curl -sS -o post-resp.json -w '%{http_code}' -X POST \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-              -d @payload.json || true)
-            echo "diag comment POST -> HTTP ${pcode:-none}: $(head -c 200 post-resp.json 2>/dev/null)"
-            if [ "${pcode:-}" = "201" ]; then echo "diagnostics comment posted"; fi
-          fi
-          # readback channel 2: annotations carry the error grep (job logs are sign-in gated)
-          errs=$(docker exec "$WAZUH_CONTAINER" sh -c 'grep -ihE "error|invalid|cannot|fail" /var/ossec/logs/ossec.log 2>/dev/null | tail -10' 2>/dev/null || true)
-          if [ -n "$errs" ]; then
-            echo "::error::ossec.log [${{ matrix.target }}]: $(printf '%s' "$errs" | head -c 1100 | tr '\n' '~')"
-          fi
-          if [ -s restart.log ]; then
-            echo "::error::restart.log [${{ matrix.target }}]: $(tail -c 500 restart.log | tr '\n' '~')"
-          fi
 
       - name: Transpile the bundle (sbob ${{ matrix.sbob }}, --target ${{ matrix.transpile-target }})
         run: |
@@ -234,3 +187,60 @@ jobs:
           set -o pipefail
           SBOB_WAZUH_API_USER="$WAZUH_API_USER" SBOB_WAZUH_API_PASS="$WAZUH_API_PASS" \
             node scripts/logtest-api.ts --target "${{ matrix.target }}" --api "$WAZUH_API" 2>&1 | tee api-gate.log
+
+      - name: Post manager diagnostics to the PR (failure path — placed last so it sees every prior step)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "## lab-validate diagnostics — target \`${{ matrix.target }}\`"
+            echo '```'
+            echo "--- docker ps -a ---"; docker ps -a 2>&1 || true
+            echo "--- docker logs (tail 150) ---"; docker logs --tail 150 "$WAZUH_CONTAINER" 2>&1 || true
+            echo "--- ossec.log (tail 40) ---"
+            docker exec "$WAZUH_CONTAINER" sh -c 'tail -40 /var/ossec/logs/ossec.log' 2>&1 || true
+            echo "--- wazuh-control status ---"
+            docker exec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-control status 2>&1 || true
+            echo "--- api probe (curl -skv) ---"
+            curl -skv "$WAZUH_API/" 2>&1 | tail -25 || true
+            echo "--- corpus-gate.log (tail 60) ---"
+            tail -60 corpus-gate.log 2>&1 || true
+            echo "--- analysisd-t.log (tail 30) ---"
+            tail -30 analysisd-t.log 2>&1 || true
+            echo "--- api-gate.log (tail 60) ---"
+            tail -60 api-gate.log 2>&1 || true
+            echo "--- corpus outputs inside the container ---"
+            docker exec "$WAZUH_CONTAINER" sh -c 'tail -30 /tmp/sbob-benign.out /tmp/sbob-drift.out' 2>&1 || true
+            echo '```'
+          } > diag.md
+          cat diag.md
+          # readback channel 1: PR comment via the REST API (status visible in annotations)
+          if [ -n "${PR_NUMBER:-}" ]; then
+            jq -n --rawfile body diag.md '{body: $body}' > payload.json
+            pcode=$(curl -sS -o post-resp.json -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -d @payload.json || true)
+            echo "diag comment POST -> HTTP ${pcode:-none}: $(head -c 200 post-resp.json 2>/dev/null)"
+            if [ "${pcode:-}" = "201" ]; then echo "diagnostics comment posted"; fi
+          fi
+          # readback channel 2: annotations carry the failing-step output (job logs are sign-in gated)
+          errs=$(docker exec "$WAZUH_CONTAINER" sh -c 'grep -ihE "error|invalid|cannot|fail" /var/ossec/logs/ossec.log 2>/dev/null | tail -10' 2>/dev/null || true)
+          if [ -n "$errs" ]; then
+            echo "::error::ossec.log [${{ matrix.target }}]: $(printf '%s' "$errs" | head -c 1100 | tr '\n' '~')"
+          fi
+          if [ -s restart.log ]; then
+            echo "::error::restart.log [${{ matrix.target }}]: $(tail -c 700 restart.log | tr '\n' '~')"
+          fi
+          if [ -s analysisd-t.log ]; then
+            echo "::error::analysisd-t.log [${{ matrix.target }}]: $(grep -v '(1103)' analysisd-t.log | tail -c 700 | tr '\n' '~')"
+          fi
+          if [ -s corpus-gate.log ]; then
+            echo "::error::corpus-gate.log [${{ matrix.target }}]: $(grep -E 'FAIL|Error|error|OK:|PASS' corpus-gate.log | tail -c 900 | tr '\n' '~')"
+          fi
+          if [ -s api-gate.log ]; then
+            echo "::error::api-gate.log [${{ matrix.target }}]: $(tail -c 700 api-gate.log | tr '\n' '~')"
+          fi
