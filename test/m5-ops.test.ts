@@ -79,10 +79,10 @@ test("linux bundle ships the config-check agent-conf wodle + digest script", () 
 
 test("linux bundle emits config-check decoder + rule 100083 with the expected digest", () => {
   const bundle = linuxBundle();
-  const decoders = fileText(bundle, "wazuh/decoders/sbob/redis.xml");
+  const decoders = fileText(bundle, "wazuh/decoders/redis.xml");
   assert.match(decoders, /<decoder name="sbob-redis-config-check">/);
   assert.match(decoders, /<prematch>\^sbob-audit-digest: \[0-9a-f\]\{64\}<\/prematch>/);
-  const rules = fileText(bundle, "wazuh/rules/sbob/100000_redis_linux.xml");
+  const rules = fileText(bundle, "wazuh/rules/100000_redis_linux.xml");
   const digest = auditKeySetDigest(fileText(bundle, "wazuh/audit/sbob/redis.rules").split("\n"));
   assert.match(rules, new RegExp(`<rule id="100083" level="5">`));
   assert.ok(
@@ -95,7 +95,7 @@ test("linux bundle emits config-check decoder + rule 100083 with the expected di
 
 test("k8s bundle emits cadence rule 100081 chained off 87900 and the config-check pair", () => {
   const bundle = k8sBundle();
-  const rules = fileText(bundle, "wazuh/rules/sbob/100000_redis_k8s-node.xml");
+  const rules = fileText(bundle, "wazuh/rules/100000_redis_k8s-node.xml");
   const cadenceIdx = rules.indexOf('<rule id="100081" level="9">');
   assert.ok(cadenceIdx > 0, "cadence rule present");
   const block = rules.slice(cadenceIdx, rules.indexOf("</rule>", cadenceIdx));
@@ -109,7 +109,7 @@ test("k8s bundle emits cadence rule 100081 chained off 87900 and the config-chec
   );
   // config-check rule + decoder present on k8s too
   assert.ok(rules.includes('<rule id="100083" level="5">'));
-  assert.match(fileText(bundle, "wazuh/decoders/sbob/redis-k8s.xml"), /sbob-redis-config-check/);
+  assert.match(fileText(bundle, "wazuh/decoders/redis-k8s.xml"), /sbob-redis-config-check/);
   // wodle merged into the -k8s.xml fragment next to docker-listener
   const frag = fileText(bundle, "wazuh/agent-conf/sbob/redis-k8s.xml");
   assert.match(frag, /<wodle name="docker-listener">/);

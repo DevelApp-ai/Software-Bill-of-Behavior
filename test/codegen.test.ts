@@ -32,12 +32,11 @@ test("redis bundle has the documented file structure", () => {
     "wazuh/agent-conf/sbob/redis-audit-digest.sh",
     "wazuh/agent-conf/sbob/redis.xml",
     "wazuh/audit/sbob/redis.rules",
-    "wazuh/decoders/sbob/redis.xml",
+    "wazuh/decoders/redis.xml",
     "wazuh/lists/sbob/redis/egress_addrs",
     "wazuh/lists/sbob/redis/execs",
-    "wazuh/lists/sbob/redis/ingress_addrs",
     "wazuh/lists/sbob/redis/opens",
-    "wazuh/rules/sbob/100000_redis_linux.xml",
+    "wazuh/rules/100000_redis_linux.xml",
   ]);
 });
 
@@ -117,28 +116,32 @@ test("CDB lists: exact entries only; wildcards live in rule regexes", () => {
   const opens = m.get("wazuh/lists/sbob/redis/opens")!;
   assert.ok(opens.includes("/etc/resolv.conf:"));
   assert.ok(!opens.includes("/data"), "wildcarded /data/* is not a CDB entry");
+  // egress is encoded as raw auditd saddr hex (AF_INET bytes, uppercase)
   const egress = m.get("wazuh/lists/sbob/redis/egress_addrs")!;
-  assert.ok(egress.includes("10.96.0.10/32:cluster-dns"));
-  assert.ok(egress.includes("162.0.217.171/32:stripe-api"));
-  const ingress = m.get("wazuh/lists/sbob/redis/ingress_addrs")!;
-  assert.ok(ingress.includes("10.244.0.0/16:app-clients"));
+  assert.ok(egress.includes("020000350A60000A0000000000000000:cluster-dns"), "10.96.0.10:53 (DNS)");
+  assert.ok(egress.includes("020001BBA200D9AB0000000000000000:stripe-api"), "162.0.217.171:443");
+  // ingress 10.244.0.0/16 is a /16: not keyable in the raw-hex model, so no
+  // ingress CDB file is shipped (inert lists are not emitted, honest model)
+  assert.ok(!m.has("wazuh/lists/sbob/redis/ingress_addrs"));
 });
 
 test("rule XML: base/drift/sustained chain with correct ids and lookups", () => {
-  const xml = byPath(redisBundle()).get("wazuh/rules/sbob/100000_redis_linux.xml")!;
+  const xml = byPath(redisBundle()).get("wazuh/rules/100000_redis_linux.xml")!;
+  // every auditd-facing rule anchors on the shipped 80700 parent (lab finding)
+  assert.ok(xml.includes('<group name="sbob,redis,">'), "rules sit inside a group root");
+  assert.ok(xml.includes("<if_sid>80700</if_sid>"), "anchored on shipped 80700");
   // execs drift: CDB not_match_key over the exact list
   assert.ok(xml.includes('<rule id="100011"'));
   assert.ok(xml.includes('lookup="not_match_key"'), "negated CDB lookup present");
   // opens drift: negated-alternation regex for wildcarded /data/* + CDB for exact
   assert.ok(xml.includes('<rule id="100021"'));
   assert.ok(xml.includes("^(?!(?:/data/[^/]+(?:/[^/]+)*)$)"), "negated allow-alternation present");
-  // egress drift: negated port alternation + address list lookup
+  // egress drift: raw saddr hex list lookup (family+port+ip+padding)
   assert.ok(xml.includes('<rule id="100031"'));
-  assert.ok(xml.includes("^(?!(?:53|443)$)"), "port allowlist alternation present");
-  assert.ok(xml.includes('lookup="not_address_match_key"'), "address CDB lookup present");
-  // sustained escalation children
-  assert.ok(xml.includes('<rule id="100012"'));
-  assert.ok(xml.includes("<frequency>8</frequency>"));
+  assert.ok(xml.includes('<list field="sbob.saddr" lookup="not_match_key">etc/lists/sbob/redis/egress_addrs</list>'));
+  // sustained escalation: if_matched_sid + frequency/timeframe ATTRIBUTES
+  assert.ok(xml.includes('<rule id="100012" level="12" frequency="8" timeframe="120">'));
+  assert.ok(xml.includes("<if_matched_sid>100011</if_matched_sid>"));
   // MITRE mapping
   assert.ok(xml.includes("T1059"));
   assert.ok(xml.includes("T1005"));
@@ -149,16 +152,19 @@ test("rule XML: base/drift/sustained chain with correct ids and lookups", () => 
   // generated-bundle banner
   assert.ok(xml.includes("LAB VALIDATION PENDING"));
   assert.ok(xml.includes("do not edit by hand"));
-  // description variables reference decoded fields
-  assert.ok(xml.includes("$(sbob.exe)"));
+  // description variables reference the SHIPPED auditd decoder fields
+  assert.ok(xml.includes("$(audit.exe)"));
 });
 
-test("decoder XML: chains SYSCALL and PATH records into sbob.* fields", () => {
-  const dec = byPath(redisBundle()).get("wazuh/decoders/sbob/redis.xml")!;
+test("decoder XML: tail-joins the shipped auditd-generic chain for SOCKADDR/PATH payloads", () => {
+  const dec = byPath(redisBundle()).get("wazuh/decoders/redis.xml")!;
   assert.ok(dec.includes("<decoder"), "has decoders");
-  assert.ok(dec.includes("sbob.key"));
-  assert.ok(dec.includes("sbob.exe"));
-  assert.ok(dec.includes("sbob.path"));
+  // lab finding: custom roots for type= lines are preempted by the shipped
+  // auditd root; the shipped decoders already extract audit.key/audit.exe.
+  // sbob payloads ride the auditd-generic tail-join:
+  assert.ok(dec.includes('name="auditd-generic"'), "tail-join children on the shipped chain");
+  assert.ok(dec.includes("sbob.saddr"), "SOCKADDR saddr extractor");
+  assert.ok(dec.includes("sbob.path"), "PATH name extractor");
   assert.ok(dec.includes("LAB VALIDATION PENDING"));
 });
 
@@ -168,7 +174,7 @@ test("manifest: workload scope, file inventory, and coverage notes", () => {
   assert.equal(manifest.workload.name, "redis");
   assert.equal(manifest.workload.namespace, "cache-tier");
   assert.deepEqual(manifest.workload.scope.linuxGroups, ["sbob-redis"]);
-  assert.ok(manifest.files.includes("wazuh/rules/sbob/100000_redis_linux.xml"));
+  assert.ok(manifest.files.includes("wazuh/rules/100000_redis_linux.xml"));
   assert.ok(manifest.coverageNotes.some((n: string) => n.startsWith("ingress:")));
   assert.ok(manifest.coverageNotes.some((n: string) => n.includes("capabilities: section-absent")));
   assert.equal(manifest.labValidation, "pending");

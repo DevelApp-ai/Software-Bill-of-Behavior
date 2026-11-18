@@ -165,7 +165,7 @@ test("transpile writes the bundle, reports the slot, and does not touch the regi
     assert.equal(r.status, 0);
     assert.match(r.stdout, /workload redis \(slot 0\)/);
     assert.ok(existsSync(join(out, "redis.manifest.json")));
-    assert.ok(existsSync(join(out, "wazuh", "rules", "sbob", "100000_redis_linux.xml")));
+    assert.ok(existsSync(join(out, "wazuh", "rules", "100000_redis_linux.xml")));
     // redis is already allocated: no registry evolution, no update hint
     assert.doesNotMatch(r.stdout, /registry updated/);
     assert.equal(readFileSync(reg, "utf8"), readFileSync(REGISTRY, "utf8"));
@@ -196,7 +196,7 @@ test("transpile allocates the next slot for a new workload and prints the evolve
     // the new slot lands in its own 100xxx band, not the redis band (TDS 6.1)
     assert.ok(existsSync(join(out, "redis.manifest.json")));
     assert.ok(existsSync(join(out, "web.manifest.json")));
-    assert.ok(existsSync(join(out, "wazuh", "rules", "sbob", `${100000 + slot * 100}_web_linux.xml`)));
+    assert.ok(existsSync(join(out, "wazuh", "rules", `${100000 + slot * 100}_web_linux.xml`)));
     // the GitOps contract: the committed registry file is never mutated in place —
     // the evolved registry is printed for the operator to review and commit
     assert.equal(readFileSync(reg, "utf8"), readFileSync(REGISTRY, "utf8"));

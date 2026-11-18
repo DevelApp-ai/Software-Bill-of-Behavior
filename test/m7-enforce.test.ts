@@ -412,7 +412,7 @@ test("runEnforce: end-to-end k8s-node + np drift exit signal", async () => {
     assert.equal(result.workload, "redis");
     assert.equal(result.slot, 0);
     assert.deepEqual(result.enforcing.sort(), ["egress", "execs", "ingress"]);
-    assert.ok(result.files.includes("wazuh/rules/sbob/100000_redis_enforce.xml"));
+    assert.ok(result.files.includes("wazuh/rules/100000_redis_enforce.xml"));
     for (const rel of result.files) {
       assert.ok(existsSync(join(dir, "out", rel)), `file written: ${rel}`);
     }

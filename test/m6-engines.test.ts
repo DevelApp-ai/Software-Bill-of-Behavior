@@ -173,7 +173,7 @@ test("falco bundle: lists, drift rules, daemonset, wazuh correlation rule 100103
     "falco/sbob/redis_rules.yaml",
     "falco/sbob/redis-daemonset.yaml",
     "wazuh/manager/sbob/redis-falco.md",
-    "wazuh/rules/sbob/100000_redis_falco.xml",
+    "wazuh/rules/100000_redis_falco.xml",
     "redis.manifest.json",
   ]);
   const rules = pick(files, "falco/sbob/redis_rules.yaml");
@@ -184,7 +184,7 @@ test("falco bundle: lists, drift rules, daemonset, wazuh correlation rule 100103
   const ds = pick(files, "falco/sbob/redis-daemonset.yaml");
   assert.match(ds, /ConfigMap/);
   assert.match(ds, /FALCOSIDEKICK_WAZUH_URL/);
-  const xml = pick(files, "wazuh/rules/sbob/100000_redis_falco.xml");
+  const xml = pick(files, "wazuh/rules/100000_redis_falco.xml");
   assert.match(xml, /<rule id="100103" level="3">/);
   assert.match(xml, /name="output_fields\.container\.name" type="pcre2">\^redis\$/);
   assert.match(pick(files, "wazuh/manager/sbob/redis-falco.md"), /localfile/);

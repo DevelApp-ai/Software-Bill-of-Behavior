@@ -60,32 +60,37 @@ test("php-fpm bundle has the documented file structure at slot 1", () => {
     "wazuh/agent-conf/sbob/php-fpm-audit-digest.sh",
     "wazuh/agent-conf/sbob/php-fpm.xml",
     "wazuh/audit/sbob/php-fpm.rules",
-    "wazuh/decoders/sbob/php-fpm.xml",
+    "wazuh/decoders/php-fpm.xml",
     "wazuh/lists/sbob/php-fpm/egress_addrs",
     "wazuh/lists/sbob/php-fpm/execs",
-    "wazuh/lists/sbob/php-fpm/ingress_addrs",
     "wazuh/lists/sbob/php-fpm/opens",
-    "wazuh/rules/sbob/100100_php-fpm_linux.xml",
+    "wazuh/rules/100100_php-fpm_linux.xml",
   ]);
 });
 
 test("drift rules land on the slot-1 band: 100111/100121/100131 + sustained", () => {
-  const xml = byPath(phpBundle()).get("wazuh/rules/sbob/100100_php-fpm_linux.xml")!;
+  const xml = byPath(phpBundle()).get("wazuh/rules/100100_php-fpm_linux.xml")!;
+  // group wrapper + every auditd rule anchored on the shipped 80700 parent (lab finding)
+  assert.ok(xml.includes('<group name="sbob,php-fpm,">'));
+  assert.ok(xml.includes("<if_sid>80700</if_sid>"));
   // base chain
   assert.ok(xml.includes('<rule id="100100" level="0">'));
   assert.ok(xml.includes('<rule id="100110" level="0">'));
   // exec drift (CVE-2026-109618 in-worker RCE -> /bin/sh spawn)
   assert.ok(xml.includes('<rule id="100111" level="9">'));
-  assert.ok(xml.includes('<rule id="100112" level="12">'));
+  assert.ok(xml.includes('<rule id="100112" level="12" frequency="8" timeframe="120">'));
+  assert.ok(xml.includes("<if_matched_sid>100111</if_matched_sid>"));
   // open drift (webshell drop to /var/tmp)
   assert.ok(xml.includes('<rule id="100121" level="9">'));
   // connect drift (reverse shell / C2, CVE-2026-109619)
   assert.ok(xml.includes('<rule id="100131" level="9">'));
-  // port allowlist carries only the declared memcache port
-  assert.ok(xml.includes("^(?!(?:11211)$)"), "negated port alternation for 11211");
+  // egress drift evaluates raw saddr hex: the declared memcache (ip,port) pair
+  // is an exact CDB key on sbob.saddr (no dotted-IP/port conditions exist anymore)
+  assert.ok(xml.includes('<list field="sbob.saddr" lookup="not_match_key">etc/lists/sbob/php-fpm/egress_addrs</list>'));
   // signature pack at (6,x): 100160-100163 — memfd (fileless variant) included
   assert.ok(xml.includes('<rule id="100163" level="10">'));
   assert.ok(xml.match(/<rule id="100163"[\s\S]*?sbob-memfd/) !== null, "memfd signature keyed on sbob-memfd");
+  assert.ok(xml.match(/<rule id="100163"[\s\S]*?<if_sid>80700<\/if_sid>/) !== null, "memfd signature anchored on 80700");
   // slot 0 (redis) band must be untouched
   assert.ok(!xml.includes('id="100011"'));
   // MITRE mapping
@@ -114,7 +119,7 @@ test("opens allowlist: web root + sessions wildcards live in the rule regex, res
   const opens = m.get("wazuh/lists/sbob/php-fpm/opens")!;
   assert.ok(opens.includes("/etc/resolv.conf:"));
   assert.ok(!opens.includes("/var/www"), "wildcarded web root is not a CDB entry");
-  const xml = m.get("wazuh/rules/sbob/100100_php-fpm_linux.xml")!;
+  const xml = m.get("wazuh/rules/100100_php-fpm_linux.xml")!;
   assert.ok(
     xml.includes("^(?!(?:/var/www/html/[^/]+(?:/[^/]+)*|/var/lib/php/sessions/[^/]+(?:/[^/]+)*)$)"),
     "negated allow-alternation covers the web root and session dir",
@@ -123,11 +128,13 @@ test("opens allowlist: web root + sessions wildcards live in the rule regex, res
 
 test("egress/ingress CDB: internal memcache declared, nginx frontends inbound", () => {
   const m = byPath(phpBundle());
+  // egress is keyed on raw auditd saddr hex (AF_INET bytes, UPPERCASE):
+  // 10.96.100.10:11211 = family 0200 + port 2BCB + ip 0A60640A + zero padding
   const egress = m.get("wazuh/lists/sbob/php-fpm/egress_addrs")!;
-  assert.ok(egress.includes("10.96.100.10/32:internal-memcache"));
-  const ingress = m.get("wazuh/lists/sbob/php-fpm/ingress_addrs")!;
-  assert.ok(ingress.includes("10.244.0.0/16:nginx-frontends"));
-  assert.ok(ingress.includes("10.244.0.0/16:nginx-frontends"));
+  assert.ok(egress.includes("02002BCB0A60640A0000000000000000:internal-memcache"));
+  // ingress 10.244.0.0/16 is a /16: not keyable in the raw-hex model, so no
+  // inert ingress list is shipped (the Linux ingress rule is informational)
+  assert.ok(!m.has("wazuh/lists/sbob/php-fpm/ingress_addrs"));
 });
 
 test("manifest carries the web-tier workload scope and pending lab validation", () => {
@@ -305,7 +312,7 @@ test("transpile: php-fpm allocates no new slot — registry already carries slot
     assert.equal(result.workloads.length, 1);
     assert.equal(result.workloads[0]!.name, "php-fpm");
     assert.equal(result.workloads[0]!.slot, 1);
-    assert.ok(result.workloads[0]!.files.includes("wazuh/rules/sbob/100100_php-fpm_linux.xml"));
+    assert.ok(result.workloads[0]!.files.includes("wazuh/rules/100100_php-fpm_linux.xml"));
     assert.equal(result.registryUpdated, false, "php-fpm: slot 1 is committed — no registry evolution");
   } finally {
     rmSync(dir, { recursive: true, force: true });

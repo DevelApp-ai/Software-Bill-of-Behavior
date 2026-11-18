@@ -76,7 +76,7 @@ test("with-lab allocator stamps validated banner + manifest evidence (linux)", (
   const lab = parseLabValidations(LAB_YAML).get("redis")!;
   const files = generateLinuxBundle(redisIR(), makeAllocator("redis", 0, lab));
   const banner = "LAB VALIDATED (2026-10-29, wazuh/wazuh-manager:4.14.6): evidence https://example.invalid/actions/runs/1";
-  assert.ok(files.find((f) => f.path === "wazuh/decoders/sbob/redis.xml")!.content.includes(banner));
+  assert.ok(files.find((f) => f.path === "wazuh/decoders/redis.xml")!.content.includes(banner));
   assert.ok(files.find((f) => f.path.endsWith("_redis_linux.xml"))!.content.includes(banner));
   const manifest = manifestOf(files, "redis.manifest.json");
   assert.equal(manifest.labValidation, "validated");
@@ -110,7 +110,7 @@ test("with-lab allocator stamps the k8s-node bundle too (attribution target)", (
   const lab = parseLabValidations(LAB_YAML).get("redis")!;
   const files = generateK8sNodeBundle(redisIR(), makeAllocator("redis", 0, lab));
   const banner = "LAB VALIDATED (2026-10-29, wazuh/wazuh-manager:4.14.6): evidence https://example.invalid/actions/runs/1";
-  assert.ok(files.find((f) => f.path === "wazuh/decoders/sbob/redis-k8s.xml")!.content.includes(banner));
+  assert.ok(files.find((f) => f.path === "wazuh/decoders/redis-k8s.xml")!.content.includes(banner));
   assert.ok(files.find((f) => f.path.endsWith("_redis_k8s-node.xml"))!.content.includes(banner));
   assert.equal(manifestOf(files, "redis.manifest.json").labValidation, "validated");
 });

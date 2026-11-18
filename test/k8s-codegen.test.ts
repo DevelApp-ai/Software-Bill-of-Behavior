@@ -34,14 +34,13 @@ test("redis k8s-node bundle has the documented file structure", () => {
     "wazuh/agent-conf/sbob/redis-audit-digest.sh",
     "wazuh/agent-conf/sbob/redis-k8s.xml",
     "wazuh/audit/sbob/redis.rules",
-    "wazuh/decoders/sbob/redis-k8s.xml",
+    "wazuh/decoders/redis-k8s.xml",
     "wazuh/lists/sbob/k8s/podmap",
     "wazuh/lists/sbob/redis/egress_addrs",
     "wazuh/lists/sbob/redis/execs",
-    "wazuh/lists/sbob/redis/ingress_addrs",
     "wazuh/lists/sbob/redis/opens",
     "wazuh/manager/sbob/k8s-api-audit.md",
-    "wazuh/rules/sbob/100000_redis_k8s-node.xml",
+    "wazuh/rules/100000_redis_k8s-node.xml",
   ]);
 });
 
@@ -54,20 +53,26 @@ test("k8s bundle is deterministic across runs", () => {
 
 test("attribution rules use the (7,x) band: 100070 base, 100071 unresolved, 100073 weak, 100074 lifecycle", () => {
   const { files } = redisK8sBundle();
-  const xml = byPath(files).get("wazuh/rules/sbob/100000_redis_k8s-node.xml")!;
+  const xml = byPath(files).get("wazuh/rules/100000_redis_k8s-node.xml")!;
   for (const id of [100070, 100071, 100073, 100074]) assert.ok(ruleBlock(xml, id), `rule ${id}`);
-  // base chains on auditd group + pod_uid field; unresolved chains via if_sid
-  assert.match(ruleBlock(xml, 100070), /<if_group>auditd<\/if_group>/);
+  // every auditd-facing rule anchors on the shipped 80700 parent (lab finding:
+  // root rules never fire for auditd-decoded events); base asserts an sbob key
+  // + the cgroup-derived pod uid; unresolved chains via if_sid + podmap CDB
+  assert.match(ruleBlock(xml, 100070), /<if_sid>80700<\/if_sid>/);
+  assert.match(ruleBlock(xml, 100070), /<field name="audit\.key" type="pcre2">\^sbob-<\/field>/);
   assert.match(ruleBlock(xml, 100070), /<field name="sbob\.pod_uid" type="pcre2">/);
+  assert.ok(xml.includes("LAB-INERT on stock 4.14.6"), "(7,0) documents the stock-4.14.6 lab-inert state honestly");
   assert.match(ruleBlock(xml, 100071), /<if_sid>100070<\/if_sid>/);
-  assert.match(ruleBlock(xml, 100073), /<if_group>auditd<\/if_group>/);
+  assert.match(ruleBlock(xml, 100071), /<list field="sbob\.pod_uid" lookup="not_match_key">etc\/lists\/sbob\/k8s\/podmap<\/list>/);
+  assert.match(ruleBlock(xml, 100073), /<if_sid>80700<\/if_sid>/);
+  assert.match(ruleBlock(xml, 100073), /<field name="audit\.key" type="pcre2">\^sbob-\(\?:exec\|open\|connect\)\$<\/field>/);
   // lifecycle chains off the shipped docker integration parent
   assert.match(ruleBlock(xml, 100074), new RegExp(`<if_sid>${DOCKER_PARENT_RULE}</if_sid>`));
 });
 
 test("pod_uid field regex accepts real hex UUID pod uids (dash and underscore spellings), rejects garbage", () => {
   const { files } = redisK8sBundle();
-  const xml = byPath(files).get("wazuh/rules/sbob/100000_redis_k8s-node.xml")!;
+  const xml = byPath(files).get("wazuh/rules/100000_redis_k8s-node.xml")!;
   const block = ruleBlock(xml, 100070);
   const m = /<field name="sbob\.pod_uid" type="pcre2">(.*?)<\/field>/.exec(block);
   assert.ok(m, "pod_uid field present");
@@ -81,11 +86,15 @@ test("pod_uid field regex accepts real hex UUID pod uids (dash and underscore sp
 
 test("cgroup decoders: OS_Regex-safe syntax and semantic coverage of the three cgroup forms", () => {
   const { files } = redisK8sBundle();
-  const xml = byPath(files).get("wazuh/decoders/sbob/redis-k8s.xml")!;
+  const xml = byPath(files).get("wazuh/decoders/redis-k8s.xml")!;
   const decoders = [...xml.matchAll(/<decoder name="(sbob-redis-audit-cgroup[^"]*)">([\s\S]*?)<\/decoder>/g)];
   assert.equal(decoders.length, 3, "three sibling cgroup decoders");
+  // lab finding: the old custom sbob-audit-key chain was preempted by the
+  // shipped auditd root, so the cgroup decoders tail-join the SHIPPED
+  // auditd-generic (re-declared in this file to attach the children)
+  assert.ok(xml.includes('name="auditd-generic"'), "auditd-generic re-declared for the tail-join");
   for (const [, name, body] of decoders) {
-    assert.ok(/<parent>sbob-redis-audit-key<\/parent>/.test(body), `${name} chains on the audit-key parent`);
+    assert.ok(/<parent>auditd-generic<\/parent>/.test(body), `${name} tail-joins the shipped auditd-generic`);
     assert.ok(/<order>sbob\.pod_uid<\/order>/.test(body), `${name} extracts sbob.pod_uid`);
     const regex = /<regex>(.*?)<\/regex>/.exec(body)![1];
     // OS_Regex has no character classes, no {n,m}, no lookarounds
@@ -135,7 +144,7 @@ test("drift rules reuse the linux section engine with mode A comments in the aud
   const { ir, files } = redisK8sBundle();
   const audit = byPath(files).get("wazuh/audit/sbob/redis.rules")!;
   assert.ok(audit.includes("cgroup"), "audit fragment mentions the cgroup requirement");
-  const xml = byPath(files).get("wazuh/rules/sbob/100000_redis_k8s-node.xml")!;
+  const xml = byPath(files).get("wazuh/rules/100000_redis_k8s-node.xml")!;
   // the core linux drift rules are present with the same ids as the linux bundle
   for (const id of [100000, 100010, 100011, 100012, 100020, 100021, 100022, 100030, 100031, 100032])
     assert.ok(ruleBlock(xml, id), `linux section rule ${id} reused`);
@@ -153,7 +162,7 @@ test("imageRepoRegex matches repo name at path/tag/digest boundaries", () => {
 
 test("lifecycle rule gates docker.status and the workload image repo", () => {
   const { ir, files } = redisK8sBundle();
-  const xml = byPath(files).get("wazuh/rules/sbob/100000_redis_k8s-node.xml")!;
+  const xml = byPath(files).get("wazuh/rules/100000_redis_k8s-node.xml")!;
   const block = ruleBlock(xml, 100074);
   assert.match(block, /<field name="docker\.status" type="pcre2">\^start\$<\/field>/);
   const imageField = /<field name="docker\.Actor\.Attributes\.image" type="pcre2">(.*?)<\/field>/.exec(block);

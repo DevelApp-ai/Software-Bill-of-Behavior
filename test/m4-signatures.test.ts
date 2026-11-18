@@ -101,11 +101,18 @@ test("overlay watchlist regexes match the intended path classes", () => {
   assert.ok(sa.test("/var/run/secrets/kubernetes.io/serviceaccount/token"));
   assert.ok(sa.test("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"));
   assert.ok(!sa.test("/var/run/secrets/kubernetes.io/serviceaccount/other"));
+  // the service-CIDR overlay evaluates RAW saddr hex, not dotted IPs (lab
+  // model, TDS 7.3.1): family 0200 + port + ip bytes + zero padding, UPPERCASE
   const cidr = new RegExp(K8S_SERVICE_CIDR_REGEX);
-  assert.ok(cidr.test("10.96.0.1")); // kubeadm API VIP
-  assert.ok(cidr.test("10.111.255.12"));
-  assert.ok(!cidr.test("10.95.0.1")); // below the /12
-  assert.ok(!cidr.test("10.112.0.1")); // above the /12
+  const saddr = (ip: string, port = 6443) =>
+    "0200" + port.toString(16).toUpperCase().padStart(4, "0") +
+    ip.split(".").map((o) => Number(o).toString(16).toUpperCase().padStart(2, "0")).join("") +
+    "0".repeat(16);
+  assert.ok(cidr.test(saddr("10.96.0.1"))); // kubeadm API VIP
+  assert.ok(cidr.test(saddr("10.111.255.12", 443)));
+  assert.ok(!cidr.test(saddr("10.95.0.1"))); // below the /12
+  assert.ok(!cidr.test(saddr("10.112.0.1"))); // above the /12
+  assert.ok(!cidr.test("10.96.0.1"), "dotted IPs are not the evaluation space anymore");
 });
 
 test("containerAllowed=true suppresses rule + audit line entirely", () => {
@@ -125,8 +132,9 @@ test("processAllowed emits a CDB sigexempts list and not_match_key on the rule",
   assert.ok(listFile, "sigexempts list file emitted");
   assert.match(listFile!.content, /^kubelet:1$/m);
   const block = ruleBlock(xml, 100062);
-  assert.match(block, /field="sbob\.comm" lookup="not_match_key"/);
-  assert.match(block, /sbob\/redis\/sigexempts\/process-tracing/);
+  // exemptions consult audit.command (the shipped decoder's comm= field), not a custom sbob.comm
+  assert.match(block, /field="audit.command" lookup="not_match_key"/);
+  assert.match(block, /etc\/lists\/sbob\/redis\/sigexempts\/process-tracing/);
 });
 
 test("explicit rulePolicies requires lint confirmation when empty", () => {
