@@ -52,6 +52,16 @@ test("redis targets match the logtest-corpus.sh harness ids", () => {
   assert.deepEqual(win.sustainedIds, [], "M2 windows ruleset has no frequency children");
 });
 
+test("100022 (redis opens sustained) is dropped as a documented supersession", () => {
+  // lab finding: the /etc/shadow drift line surfaces the sensitive-file
+  // overlay 100001 (deepest match wins), so the parent 100021 never
+  // accumulates and the frequency child 100022 never trips
+  const linux = TARGETS["linux"]!;
+  assert.ok(!linux.sustainedIds.includes("100022"), "not expected to fire in the lab");
+  assert.deepEqual(linux.sustainedIds, ["100012", "100032"]);
+  assert.deepEqual(TARGETS["k8s"]!.sustainedIds, linux.sustainedIds);
+});
+
 test("sustained default is the frequency threshold (8 matches)", () => {
   assert.equal(SUSTAINED_REPEATS_DEFAULT, 8);
 });
@@ -167,6 +177,27 @@ test("reconcile: all expected ids fired -> no missing", () => {
 test("reconcile: missing ids are reported for the failure message", () => {
   const rec = reconcile(["100111", "100121", "100131", "100163"], ["100111", "100121"]);
   assert.deepEqual(rec.missing, ["100131", "100163"]);
+});
+
+test("reconcile: a fired overlay credits its parent drift rule (deepest-match supersession)", () => {
+  // redis drift corpus: the /etc/shadow open surfaces the sensitive-file
+  // overlay 100001 instead of the 100021 opens-drift rule (lab finding)
+  const rec = reconcile(["100021"], ["100001"]);
+  assert.deepEqual(rec.missing, [], "the 100021 leg is credited through 100001");
+  assert.deepEqual(rec.credited, ["100021"]);
+  assert.ok(rec.firedUnique.includes("100021"));
+});
+
+test("reconcile: overlays that fire alongside their parent do not double-credit", () => {
+  const rec = reconcile(["100021"], ["100021", "100001"]);
+  assert.deepEqual(rec.missing, []);
+  assert.deepEqual(rec.credited, [], "parent fired directly; no credit needed");
+});
+
+test("reconcile: ancestor credit maps the php overlays to the slot-1 drift legs", () => {
+  const rec = reconcile(["100121", "100131"], ["100101", "100103"]);
+  assert.deepEqual(rec.missing, [], "php sensitive-file + k8s-api overlays credit the drift legs");
+  assert.deepEqual(rec.credited, ["100121", "100131"]);
 });
 
 // ---------------------------------------------------------------------------

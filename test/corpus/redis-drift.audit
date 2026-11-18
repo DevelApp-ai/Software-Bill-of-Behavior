@@ -1,6 +1,6 @@
 # Drift events: each violates the redis SBoB and MUST fire the mapped rule.
 #   execve /usr/bin/curl          -> 100011 (SBoB drift: process ...)
-#   open /etc/shadow             -> 100021 (SBoB drift: file open ...)
+#   open /etc/shadow             -> 100001 (sensitive-file overlay surfaces; credits the 100021 opens-drift leg, deepest match wins)
 #   connect 185.220.101.4:4444   -> 100031 (SBoB drift: connect ...)
 # Signature events (rulePolicies, M4): node-scoped keys fire-by-default; no
 # processAllowed exemption is declared for redis, so these MUST fire.

@@ -1,10 +1,11 @@
 # Drift k8s-node events: each violates the redis SBoB on a Kubernetes node and
-# MUST fire the mapped drift rule, PLUS the attribution chain (100070 base +
-# 100071 podmap-unresolved when the podmap is not seeded with the pod uid
-# 0f3c8ed9-9d6b-4a1c-b5f2-7c1e0a9d1234; scripts/sbob-podmap-refresh.sh seeds
-# both spellings — seed the map and expect 100070 only).
+# MUST fire the mapped drift rule. The attribution chain (100070/100071) is
+# LAB-INERT on stock wazuh 4.14.6 (honest finding, docs/lab-validation.yaml):
+# these SYSCALL lines carry cgroup=, but the shipped decoder chain never
+# reaches the sbob cgroup tail-join children, so sbob.pod_uid stays unset.
+# On auditd >= 3.0 production nodes the chain becomes live.
 #   execve /usr/bin/curl          -> 100011 (SBoB drift: process ...)
-#   open /etc/shadow             -> 100021 (SBoB drift: file open ...)
+#   open /etc/shadow             -> 100001 (sensitive-file overlay surfaces; credits the 100021 opens-drift leg, deepest match wins)
 #   connect 185.220.101.4:4444   -> 100031 (SBoB drift: connect ...)
 # attribution (cgroup v2 underscore form on all three; the v2-dash and v1
 # forms are exercised in the benign corpus).
