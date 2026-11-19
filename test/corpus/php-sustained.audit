@@ -1,0 +1,102 @@
+# Sustained replay corpus (issue #42): 8 rounds of exec drift (/bin/sh), the
+# webshell create (generic undeclared open, no overlay), a SENSITIVE open
+# (/etc/shadow, overlay wins) and the C2 connect. Replay 8x in ONE logtest
+# session; assert on the 8th round: 100112 (exec), 100122 (webshell open),
+# 100109 (sensitive open, chained off the overlay), 100132 (C2 egress).
+
+type=SYSCALL msg=audit(1699999900.100:3100): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-exec-php-fpm"
+type=EXECVE msg=audit(1699999900.100:3100): argc=3 a0="/bin/sh" a1="-c" a2="id > /var/tmp/.pwned"
+
+type=SYSCALL msg=audit(1699999900.200:3100): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999900.200:3100): item=0 name="/var/tmp/.php2shell.php" inode=13130 dev=fd:01 mode=0100644 ouid=33 ogid=33 rdev=00:00 nametype=CREATE cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999900.300:3100): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999900.300:3100): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999900.400:3100): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-connect-php-fpm"
+type=SOCKADDR msg=audit(1699999900.400:3100): saddr=0200115C2D9B940C0000000000000000
+
+type=SYSCALL msg=audit(1699999901.100:3101): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-exec-php-fpm"
+type=EXECVE msg=audit(1699999901.100:3101): argc=3 a0="/bin/sh" a1="-c" a2="id > /var/tmp/.pwned"
+
+type=SYSCALL msg=audit(1699999901.200:3101): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999901.200:3101): item=0 name="/var/tmp/.php2shell.php" inode=13130 dev=fd:01 mode=0100644 ouid=33 ogid=33 rdev=00:00 nametype=CREATE cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999901.300:3101): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999901.300:3101): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999901.400:3101): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-connect-php-fpm"
+type=SOCKADDR msg=audit(1699999901.400:3101): saddr=0200115C2D9B940C0000000000000000
+
+type=SYSCALL msg=audit(1699999902.100:3102): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-exec-php-fpm"
+type=EXECVE msg=audit(1699999902.100:3102): argc=3 a0="/bin/sh" a1="-c" a2="id > /var/tmp/.pwned"
+
+type=SYSCALL msg=audit(1699999902.200:3102): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999902.200:3102): item=0 name="/var/tmp/.php2shell.php" inode=13130 dev=fd:01 mode=0100644 ouid=33 ogid=33 rdev=00:00 nametype=CREATE cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999902.300:3102): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999902.300:3102): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999902.400:3102): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-connect-php-fpm"
+type=SOCKADDR msg=audit(1699999902.400:3102): saddr=0200115C2D9B940C0000000000000000
+
+type=SYSCALL msg=audit(1699999903.100:3103): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-exec-php-fpm"
+type=EXECVE msg=audit(1699999903.100:3103): argc=3 a0="/bin/sh" a1="-c" a2="id > /var/tmp/.pwned"
+
+type=SYSCALL msg=audit(1699999903.200:3103): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999903.200:3103): item=0 name="/var/tmp/.php2shell.php" inode=13130 dev=fd:01 mode=0100644 ouid=33 ogid=33 rdev=00:00 nametype=CREATE cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999903.300:3103): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999903.300:3103): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999903.400:3103): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-connect-php-fpm"
+type=SOCKADDR msg=audit(1699999903.400:3103): saddr=0200115C2D9B940C0000000000000000
+
+type=SYSCALL msg=audit(1699999904.100:3104): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-exec-php-fpm"
+type=EXECVE msg=audit(1699999904.100:3104): argc=3 a0="/bin/sh" a1="-c" a2="id > /var/tmp/.pwned"
+
+type=SYSCALL msg=audit(1699999904.200:3104): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999904.200:3104): item=0 name="/var/tmp/.php2shell.php" inode=13130 dev=fd:01 mode=0100644 ouid=33 ogid=33 rdev=00:00 nametype=CREATE cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999904.300:3104): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999904.300:3104): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999904.400:3104): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-connect-php-fpm"
+type=SOCKADDR msg=audit(1699999904.400:3104): saddr=0200115C2D9B940C0000000000000000
+
+type=SYSCALL msg=audit(1699999905.100:3105): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-exec-php-fpm"
+type=EXECVE msg=audit(1699999905.100:3105): argc=3 a0="/bin/sh" a1="-c" a2="id > /var/tmp/.pwned"
+
+type=SYSCALL msg=audit(1699999905.200:3105): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999905.200:3105): item=0 name="/var/tmp/.php2shell.php" inode=13130 dev=fd:01 mode=0100644 ouid=33 ogid=33 rdev=00:00 nametype=CREATE cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999905.300:3105): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999905.300:3105): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999905.400:3105): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-connect-php-fpm"
+type=SOCKADDR msg=audit(1699999905.400:3105): saddr=0200115C2D9B940C0000000000000000
+
+type=SYSCALL msg=audit(1699999906.100:3106): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-exec-php-fpm"
+type=EXECVE msg=audit(1699999906.100:3106): argc=3 a0="/bin/sh" a1="-c" a2="id > /var/tmp/.pwned"
+
+type=SYSCALL msg=audit(1699999906.200:3106): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999906.200:3106): item=0 name="/var/tmp/.php2shell.php" inode=13130 dev=fd:01 mode=0100644 ouid=33 ogid=33 rdev=00:00 nametype=CREATE cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999906.300:3106): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999906.300:3106): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999906.400:3106): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-connect-php-fpm"
+type=SOCKADDR msg=audit(1699999906.400:3106): saddr=0200115C2D9B940C0000000000000000
+
+type=SYSCALL msg=audit(1699999907.100:3107): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-exec-php-fpm"
+type=EXECVE msg=audit(1699999907.100:3107): argc=3 a0="/bin/sh" a1="-c" a2="id > /var/tmp/.pwned"
+
+type=SYSCALL msg=audit(1699999907.200:3107): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999907.200:3107): item=0 name="/var/tmp/.php2shell.php" inode=13130 dev=fd:01 mode=0100644 ouid=33 ogid=33 rdev=00:00 nametype=CREATE cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999907.300:3107): arch=c000003e syscall=257 success=yes exit=6 items=1 ppid=3001 pid=3002 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="php-fpm" exe="/usr/local/sbin/php-fpm" subj=unconfined key="sbob-open-php-fpm"
+type=PATH msg=audit(1699999907.300:3107): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999907.400:3107): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=33 gid=33 euid=33 suid=33 fsuid=33 egid=33 sgid=33 fsgid=33 tty=(none) ses=4294967295 comm="sh" exe="/bin/sh" subj=unconfined key="sbob-connect-php-fpm"
+type=SOCKADDR msg=audit(1699999907.400:3107): saddr=0200115C2D9B940C0000000000000000
+
