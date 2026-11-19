@@ -29,5 +29,5 @@
 -a always,exit -F arch=b32 -S memfd_create -k sbob-memfd
 # k8s-node: container exes resolve inside the pod mount namespace (overlayfs),
 # so Mode A keys carry the workload identity implicitly (TDS 6.3 tier 2).
-# cgroup field: keep auditd >= 3.0 defaults — SYSCALL records then carry cgroup=, enabling tier-1 pod attribution.
+# tier-1 cgroup attribution is INERT on wazuh 4.14.6 (shipped auditd family preempts custom audit roots);
 
