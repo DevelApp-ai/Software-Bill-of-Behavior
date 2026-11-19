@@ -59,7 +59,15 @@ jobs:
       - name: Start the disposable Wazuh manager (${{ env.WAZUH_IMAGE }})
         run: |
           docker pull "$WAZUH_IMAGE"
+          # --ulimit nofile=458752:458752: analysisd setrlimit(RLIMIT_NOFILE,
+          # 458752) fails with EPERM when the container inherits a lower hard
+          # limit and lacks CAP_SYS_RESOURCE ("Could not set resource limit
+          # for file descriptors"), making even `wazuh-analysisd -t` exit 1.
+          # Pre-set the exact limit so the setrlimit is a no-op.
+          # --cap-add=SYS_RESOURCE: belt-and-braces (lets root raise limits).
           docker run -d --name "$WAZUH_CONTAINER" \
+            --ulimit nofile=458752:458752 \
+            --cap-add=SYS_RESOURCE \
             -p 1514:1514 -p 1515:1515 -p 55000:55000 \
             "$WAZUH_IMAGE"
           # wait up to 8 min: any HTTP response (even 401) means the API is listening
