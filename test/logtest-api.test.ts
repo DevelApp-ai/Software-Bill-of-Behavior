@@ -35,7 +35,7 @@ import {
 test("php target maps the PHP2Shell drift and sustained rule bands", () => {
   const php = TARGETS["php"]!;
   assert.deepEqual(php.driftIds, ["100111", "100121", "100131", "100163"]);
-  assert.deepEqual(php.sustainedIds, ["100112", "100122", "100132"]);
+  assert.deepEqual(php.sustainedIds, ["100112", "100122", "100132", "100109"], "overlay-sustained child included (winner-context finding, issue #42)");
   assert.equal(php.benign, "test/corpus/php-benign.audit");
   assert.equal(php.drift, "test/corpus/php-drift.audit");
   assert.deepEqual(php.attributionInfoIds, []);
@@ -43,13 +43,21 @@ test("php target maps the PHP2Shell drift and sustained rule bands", () => {
 
 test("redis targets match the logtest-corpus.sh harness ids", () => {
   const linux = TARGETS["linux"]!;
-  assert.deepEqual(linux.driftIds, ["100011", "100021", "100031", "100060", "100062"]);
+  // 100001 not 100021: the sensitive-file overlay outshadows the opens drift
+  // parent in the display (the drift open is /etc/shadow) — proven on 4.14.6
+  assert.deepEqual(linux.driftIds, ["100011", "100001", "100031", "100060", "100062"]);
   const k8s = TARGETS["k8s"]!;
   assert.deepEqual(k8s.driftIds, linux.driftIds);
   assert.deepEqual(k8s.attributionInfoIds, ["100070", "100071", "100073", "100074"], "attribution info rules are exempt on benign");
   const win = TARGETS["windows"]!;
   assert.deepEqual(win.driftIds, ["100016", "100006", "100026", "100036", "100007"]);
-  assert.deepEqual(win.sustainedIds, [], "M2 windows ruleset has no frequency children");
+  assert.deepEqual(win.sustainedIds, ["100017", "100027", "100037"], "windows sustained children proven via json log_format sessions");
+  assert.equal(win.logFormat, "json");
+  assert.equal(linux.logFormat, "syslog");
+  assert.equal(linux.sustainedCorpus, "test/corpus/redis-sustained.audit");
+  const phpSpec = TARGETS["php"]!;
+  assert.equal(phpSpec.sustainedCorpus, "test/corpus/php-sustained.audit");
+  assert.equal(win.sustainedCorpus, null, "windows: 8x drift replay instead of a dedicated corpus");
 });
 
 test("sustained default is the frequency threshold (8 matches)", () => {
