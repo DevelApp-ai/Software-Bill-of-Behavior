@@ -24,7 +24,7 @@ function byPath(files: ReturnType<typeof generateWindowsBundle>) {
 
 /** Extract the <field> regex content for a rule id / field name from XML. */
 function fieldRegex(xml: string, ruleId: number, fieldName: string): string {
-  const ruleRe = new RegExp(`<rule id="${ruleId}"[^>]*>([\\s\\S]*?)</rule>`, "m");
+  const ruleRe = new RegExp(`<rule\\s+id="${ruleId}"[^>]*>([\\s\\S]*?)</rule>`, "m");
   const rule = ruleRe.exec(xml)?.[1];
   assert.ok(rule, `rule ${ruleId} present`);
   const f = new RegExp(`<field name="${fieldName.replace(/\./g, "\\.")}" type="pcre2">([\\s\\S]*?)</field>`).exec(rule);
@@ -38,7 +38,7 @@ function fieldRegex(xml: string, ruleId: number, fieldName: string): string {
 }
 
 function ruleBlock(xml: string, ruleId: number): string {
-  const m = new RegExp(`<rule id="${ruleId}"[^>]*>([\\s\\S]*?)</rule>`, "m").exec(xml);
+  const m = new RegExp(`<rule\\s+id="${ruleId}"[^>]*>([\\s\\S]*?)</rule>`, "m").exec(xml);
   assert.ok(m, `rule ${ruleId} present`);
   return m[1];
 }
@@ -79,7 +79,7 @@ test("windows rules carry type=\"pcre2\" on every field condition (OS_Regex defa
 
 test("rule ids follow the TDS 6.1 layout; every if_sid resolves inside the file or to the shipped 61600 parent", () => {
   const xml = byPath(redisWindowsBundle().files).get("wazuh/rules/sbob/100000_redis_windows.xml")!;
-  const ids = [...xml.matchAll(/<rule id="(\d+)" level="(\d+)">/g)].map((m) => Number(m[1]));
+  const ids = [...xml.matchAll(/<rule\s+id="(\d+)" level="(\d+)"/g)].map((m) => Number(m[1]));
   // 100000 + slot*100 + section*10 + variant (windows variants 5-9)
   assert.deepEqual(ids.sort((a, b) => a - b), [
     100005, 100006, 100007, 100008, // base section: global base, args drift, dns drift, prereq info
@@ -154,7 +154,7 @@ test("egress drift uses the shared CDB address list and a negated port alternati
   const { files } = redisWindowsBundle();
   const xml = byPath(files).get("wazuh/rules/sbob/100000_redis_windows.xml")!;
   const drift = ruleBlock(xml, 100036);
-  assert.match(drift, /<list field="win.eventdata.destinationIp" lookup="not_address_match_key">sbob\/redis\/egress_addrs<\/list>/);
+  assert.match(drift, /<list field="win.eventdata.destinationIp" lookup="not_address_match_key">etc\/lists\/sbob\/redis\/egress_addrs<\/list>/);
   assert.equal(new RegExp(fieldRegex(xml, 100036, "win.eventdata.destinationPort")).test("443"), false);
   assert.equal(new RegExp(fieldRegex(xml, 100036, "win.eventdata.destinationPort")).test("4444"), true);
   const cdb = byPath(files).get("wazuh/lists/sbob/redis/egress_addrs")!;
@@ -166,10 +166,14 @@ test("escalation rules repeat at 8 events / 120s and chain from their drift rule
   const xml = byPath(redisWindowsBundle().files).get("wazuh/rules/sbob/100000_redis_windows.xml")!;
   for (const [id, parent] of [[100017, 100016], [100027, 100026], [100037, 100036]] as const) {
     const block = ruleBlock(xml, id);
-    assert.match(block, new RegExp(`<if_sid>${parent}</if_sid>`));
-    assert.match(block, /<frequency>8<\/frequency>/);
-    assert.match(block, /<timeframe>120<\/timeframe>/);
-    assert.match(xml, new RegExp(`<rule id="${id}" level="12">`));
+    // wazuh 4.14: correlation children chain via <if_matched_sid> (NOT if_sid)
+    // with frequency/timeframe as RULE ATTRIBUTES, level 13, plus a
+    // <same_field> so repetition actually correlates
+    assert.match(block, new RegExp(`<if_matched_sid>${parent}</if_matched_sid>`));
+    assert.match(block, /<same_field>/);
+    assert.doesNotMatch(block, /<if_sid>/);
+    assert.match(xml, new RegExp(`<rule\\s+id="${id}" level="13" frequency="8" timeframe="120">`));
+    assert.ok(!block.includes("<frequency>"), "no legacy frequency element spelling");
   }
 });
 

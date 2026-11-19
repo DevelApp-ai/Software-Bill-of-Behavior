@@ -24,8 +24,7 @@
   "files": [
     "wazuh/audit/sbob/redis.rules",
     "wazuh/lists/sbob/redis/execs",
-    "wazuh/lists/sbob/redis/opens",
-    "wazuh/lists/sbob/redis/egress_addrs",
+    "wazuh/lists/sbob/redis/egress_saddrs",
     "wazuh/lists/sbob/redis/ingress_addrs",
     "wazuh/lists/sbob/k8s/podmap",
     "wazuh/decoders/sbob/redis-k8s.xml",
@@ -428,8 +427,11 @@
     "rulePolicies: section-absent",
     "rulePolicies: section-absent — signature pack emitted with defaults (fire-by-default, no exemptions; TDS 7.4)",
     "signatures: audit keys are node-scoped (Mode B, attribution-weak) — declare processAllowed for container runtimes and node daemons (kubelet, containerd) to suppress expected noise",
+    "signatures: the kubernetes-api-access node-side connect overlay (0,3) is not emitted on wazuh 4.14 — srcip is a static field and analysisd rejects PCRE2 conditions on static fields (CDB <list> on static fields IS allowed; that is how the egress drift rule works). The policy is carried by the manager-side k8s audit-log rule (6,4)",
+    "signatures: sensitive-file overlay repetition escalates via the (0,9) sustained-signature child; the SA-token overlay (0,2) has no dedicated sustained child on the band — triage uses firedtimes (issue #42)",
     "k8s: attribution tiers per TDS 6.3 — 1 cgroup+podmap (auditd >= 3.0), 2 Mode A exe-scoped keys (default), 3 weak fallback (attribution=weak)",
-    "k8s: podmap (sbob/k8s/podmap) is node runtime data maintained by scripts/sbob-podmap-refresh.sh; not derived from the SBoB",
+    "k8s: TIER-1 ATTRIBUTION IS INERT on wazuh-manager 4.14.6 — the shipped auditd decoder family preempts custom audit ROOT decoders, so the cgroup= child decoders never run and sbob.pod_uid is never stamped; rules (7,0)/(7,1) are kept in shape for forward-compat and documented INERT (issue #42)",
+    "k8s: podmap (etc/lists/sbob/k8s/podmap) is node runtime data maintained by scripts/sbob-podmap-refresh.sh; declare it in the manager ossec.conf (<list> element) — not derived from the SBoB",
     "k8s: docker-listener lifecycle rule requires the shipped integration ruleset (parent rule 87900)",
     "k8s: DNS-name egress entries are not observable from node auditd telemetry — Windows agents detect them via Sysmon EID 22 (TDS 8)",
     "k8s: manager-side kubernetes-api-access rule (rulePolicies signature) evaluates the API audit log ingested per wazuh/manager/sbob/k8s-api-audit.md",
@@ -440,11 +442,11 @@
   "labValidationEvidence": {
     "targets": [
       "linux",
-      "windows",
-      "k8s-node"
+      "k8s-node",
+      "windows"
     ],
     "manager": "wazuh/wazuh-manager:4.14.6",
-    "date": "2026-10-29",
-    "evidence": "https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214"
+    "date": "2026-11-19",
+    "evidence": "https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/44582667834"
   }
 }

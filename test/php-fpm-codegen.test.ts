@@ -61,10 +61,9 @@ test("php-fpm bundle has the documented file structure at slot 1", () => {
     "wazuh/agent-conf/sbob/php-fpm.xml",
     "wazuh/audit/sbob/php-fpm.rules",
     "wazuh/decoders/sbob/php-fpm.xml",
-    "wazuh/lists/sbob/php-fpm/egress_addrs",
+    "wazuh/lists/sbob/php-fpm/egress_saddrs",
     "wazuh/lists/sbob/php-fpm/execs",
     "wazuh/lists/sbob/php-fpm/ingress_addrs",
-    "wazuh/lists/sbob/php-fpm/opens",
     "wazuh/rules/sbob/100100_php-fpm_linux.xml",
   ]);
 });
@@ -72,20 +71,24 @@ test("php-fpm bundle has the documented file structure at slot 1", () => {
 test("drift rules land on the slot-1 band: 100111/100121/100131 + sustained", () => {
   const xml = byPath(phpBundle()).get("wazuh/rules/sbob/100100_php-fpm_linux.xml")!;
   // base chain
-  assert.ok(xml.includes('<rule id="100100" level="0">'));
-  assert.ok(xml.includes('<rule id="100110" level="0">'));
+  assert.ok(xml.includes('<rule  id="100100" level="0">'));
+  assert.ok(xml.includes('<rule  id="100120" level="0">'));
   // exec drift (CVE-2026-109618 in-worker RCE -> /bin/sh spawn)
-  assert.ok(xml.includes('<rule id="100111" level="9">'));
-  assert.ok(xml.includes('<rule id="100112" level="12">'));
+  assert.ok(xml.includes('<rule  id="100111" level="9">'));
+  assert.ok(xml.includes('<rule  id="100112" level="13" frequency="8" timeframe="120">'), "sustained child as rule attributes");
   // open drift (webshell drop to /var/tmp)
-  assert.ok(xml.includes('<rule id="100121" level="9">'));
+  assert.ok(xml.includes('<rule  id="100121" level="9">'));
   // connect drift (reverse shell / C2, CVE-2026-109619)
-  assert.ok(xml.includes('<rule id="100131" level="9">'));
-  // port allowlist carries only the declared memcache port
-  assert.ok(xml.includes("^(?!(?:11211)$)"), "negated port alternation for 11211");
+  assert.ok(xml.includes('<rule  id="100131" level="9">'));
+  // egress drift: CDB on the STATIC srcip field keyed by the saddr hex
+  // spellings of 10.96.100.10:11211 (no port alternation on 4.14)
+  assert.ok(xml.includes('<list field="srcip" lookup="not_match_key">etc/lists/sbob/php-fpm/egress_saddrs</list>'));
+  // (0,9) overlay-sustained child (winner-context finding, issue #42)
+  assert.ok(xml.includes('<rule  id="100109" level="13" frequency="8" timeframe="120">'));
+  assert.ok(xml.includes("<if_matched_sid>100101</if_matched_sid>"), "sustained sensitive-file repetition chains off the overlay");
   // signature pack at (6,x): 100160-100163 — memfd (fileless variant) included
-  assert.ok(xml.includes('<rule id="100163" level="10">'));
-  assert.ok(xml.match(/<rule id="100163"[\s\S]*?sbob-memfd/) !== null, "memfd signature keyed on sbob-memfd");
+  assert.ok(xml.includes('<rule  id="100163" level="10">'));
+  assert.ok(xml.match(/<rule  id="100163"[\s\S]*?sbob-memfd/) !== null, "memfd signature keyed on sbob-memfd");
   // slot 0 (redis) band must be untouched
   assert.ok(!xml.includes('id="100011"'));
   // MITRE mapping
@@ -109,24 +112,23 @@ test("fail-closed execs: only the php-fpm binary is declared — any /bin/sh is 
   assert.ok(audit.includes("-k sbob-connect-php-fpm"));
 });
 
-test("opens allowlist: web root + sessions wildcards live in the rule regex, resolv.conf in CDB", () => {
+test("opens allowlist: exact + wildcard open patterns live in the rule regex (no opens CDB on 4.14)", () => {
   const m = byPath(phpBundle());
-  const opens = m.get("wazuh/lists/sbob/php-fpm/opens")!;
-  assert.ok(opens.includes("/etc/resolv.conf:"));
-  assert.ok(!opens.includes("/var/www"), "wildcarded web root is not a CDB entry");
+  assert.ok(!m.has("wazuh/lists/sbob/php-fpm/opens"), "no opens list (audit.directory.name decodes quote-wrapped)");
   const xml = m.get("wazuh/rules/sbob/100100_php-fpm_linux.xml")!;
-  assert.ok(
-    xml.includes("^(?!(?:/var/www/html/[^/]+(?:/[^/]+)*|/var/lib/php/sessions/[^/]+(?:/[^/]+)*)$)"),
-    "negated allow-alternation covers the web root and session dir",
-  );
+  // quote-anchored negated alternation: audit.directory.name decodes WITH quotes
+  assert.ok(xml.includes('^"(?!/etc/resolv'), "quote-anchored negation present");
+  assert.ok(xml.includes('/var/www/html/[^/"]+(?:/[^/"]+)*"$'), "web root wildcard in the rule regex");
+  assert.ok(xml.includes('/var/lib/php/sessions/[^/"]+(?:/[^/"]+)*"$'), "session dir wildcard in the rule regex");
 });
 
-test("egress/ingress CDB: internal memcache declared, nginx frontends inbound", () => {
+test("egress/ingress CDB: internal memcache declared as saddr hex keys, nginx frontends inbound", () => {
   const m = byPath(phpBundle());
-  const egress = m.get("wazuh/lists/sbob/php-fpm/egress_addrs")!;
-  assert.ok(egress.includes("10.96.100.10/32:internal-memcache"));
+  // egress keys are the saddr hex spellings of 10.96.100.10:11211 (both forms)
+  const egress = m.get("wazuh/lists/sbob/php-fpm/egress_saddrs")!;
+  assert.ok(egress.includes("02002BCB0A60640A"), "truncated 16-hex spelling (11211=0x2BCB, ip 0A60640A)");
+  assert.ok(egress.includes("02002BCB0A60640A0000000000000000"), "padded 32-hex spelling");
   const ingress = m.get("wazuh/lists/sbob/php-fpm/ingress_addrs")!;
-  assert.ok(ingress.includes("10.244.0.0/16:nginx-frontends"));
   assert.ok(ingress.includes("10.244.0.0/16:nginx-frontends"));
 });
 

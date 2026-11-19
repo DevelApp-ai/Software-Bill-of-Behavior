@@ -1,5 +1,6 @@
 /**
- * rulePolicies signature rules (TDS 7.4, M4 / issue #5).
+ * rulePolicies signature rules (TDS 7.4, M4 / issue #5) — wazuh 4.14 schema
+ * (issue #42 fix).
  *
  * Signature rules invert the drift model: instead of allowlist drift, they
  * fire BY DEFAULT on security-relevant primitives (module load, namespace
@@ -8,15 +9,23 @@
  * SBoB `rulePolicies` section (spec 4.8):
  *
  *   - processAllowed: comm list -> CDB sigexempts list consulted with
- *     <list field="sbob.comm" lookup="not_match_key"> directly on the rule
- *     (deviation from the TDS 6.2 sketch, documented there: saves the
- *     level-0 suppressor child rules and their variant digits).
+ *     <list field="audit.command" lookup="not_match_key"> directly on the rule
+ *     (deviation from the TDS 6.2 sketch, documented there).
  *   - containerAllowed: true -> the rule (and its audit line) is not
  *     emitted at all for this workload (spec 4.8: not a deny).
  *
- * Absence semantics (TDS 8): a section-absent rulePolicies means the pack is
- * emitted with defaults (fire-by-default, no exemptions); an explicit empty
- * mapping requires --confirm-none rulePolicies (ERR_NONE_UNCONFIRMED).
+ * Wazuh 4.14.6 engine facts (replica-verified, issue #42): the audit-keyed
+ * policies ride the SHIPPED auditd decoder family — fields audit.key /
+ * audit.command / audit.exe under the shipped "audit" group. Descriptions use
+ * $(audit.command)/$(audit.exe) substitution, which the manager renders at
+ * alert time.
+ *
+ * Indirect egress (K8S_SERVICE_CIDR overlay): DELETED on 4.14. analysisd
+ * rejects PCRE2 conditions on the STATIC srcip field ("Field 'srcip' is
+ * static") while <list> lookups on static fields ARE allowed (that is how
+ * the egress drift rule works). The manager-side k8s audit-log JSON rule
+ * (6,4) carries the kubernetes-api-access policy instead
+ * (signatureCoverageNotes documents the constraint).
  *
  * ID layout (TDS 6.1 M4 amendment): audit-keyed policies occupy the
  * rulePolicies section (code 6) variants 0-3 in the Linux/k8s band; overlays
@@ -28,7 +37,6 @@
  *   (6,4) kubernetes-api-access  manager-side JSON rule    level 12  T1552.001
  *   (0,1) sensitive-file-access       opens-drift overlay  level 12  T1552.001
  *   (0,2) service-account-token-access opens-drift overlay  level 12  T1552.001
- *   (0,3) kubernetes-api-access       egress-drift overlay  level 12  T1613
  *   (0,4) binary-not-in-container-image lifecycle correlate level  3  (triage)
  *
  * Overlays are only emitted when their parent drift rule exists (drift rules
@@ -41,6 +49,20 @@ import { SECTION_CODES } from "../ruleids.ts";
 import type { IR, RulePolicy } from "../types.ts";
 import type { XmlRule } from "./xml.ts";
 import type { BundleFile } from "./linux.ts";
+
+// ---------------------------------------------------------------------------
+// shipped-decoder field spellings (mirror src/codegen/linux.ts `F`; kept
+// literal here to avoid a linux <-> signatures import cycle)
+// ---------------------------------------------------------------------------
+
+const AUDIT_KEY = "audit.key";
+const AUDIT_EXE = "audit.exe";
+const AUDIT_COMMAND = "audit.command";
+const AUDIT_PATH = "audit.directory.name";
+const SHIPPED_AUDIT_GROUP = "audit";
+
+/** ossec.conf-relative prefix for <list> sources (wazuh 4.14 schema). */
+const LIST_PREFIX = "etc/lists/";
 
 // ---------------------------------------------------------------------------
 // policy definitions
@@ -68,7 +90,8 @@ export const AUDIT_KEYED_POLICIES: SigPolicyDef[] = [
     level: 12,
     mitre: "T1547.006",
     groupTag: "sbob-sig-module-load",
-    description: (name) => `SBoB signature: kernel module load on ${name} scope (module-load policy, TDS 7.4) — comm $(sbob.comm), exe $(sbob.exe)`,
+    description: (name) =>
+      `SBoB signature: kernel module load on ${name} scope (module-load policy, TDS 7.4) — comm $(audit.command), exe $(audit.exe)`,
   },
   {
     name: "namespace-change",
@@ -77,7 +100,8 @@ export const AUDIT_KEYED_POLICIES: SigPolicyDef[] = [
     level: 10,
     mitre: "T1611",
     groupTag: "sbob-sig-namespace-change",
-    description: (name) => `SBoB signature: namespace change (unshare/setns) on ${name} scope (namespace-change policy, TDS 7.4) — comm $(sbob.comm), exe $(sbob.exe)`,
+    description: (name) =>
+      `SBoB signature: namespace change (unshare/setns) on ${name} scope (namespace-change policy, TDS 7.4) — comm $(audit.command), exe $(audit.exe)`,
   },
   {
     name: "process-tracing",
@@ -86,7 +110,8 @@ export const AUDIT_KEYED_POLICIES: SigPolicyDef[] = [
     level: 10,
     mitre: "T1055.008",
     groupTag: "sbob-sig-process-tracing",
-    description: (name) => `SBoB signature: ptrace on ${name} scope (process-tracing policy, TDS 7.4) — comm $(sbob.comm), exe $(sbob.exe)`,
+    description: (name) =>
+      `SBoB signature: ptrace on ${name} scope (process-tracing policy, TDS 7.4) — comm $(audit.command), exe $(audit.exe)`,
   },
   {
     name: "execution-from-memory",
@@ -95,22 +120,22 @@ export const AUDIT_KEYED_POLICIES: SigPolicyDef[] = [
     level: 10,
     mitre: "T1620",
     groupTag: "sbob-sig-execution-from-memory",
-    description: (name) => `SBoB signature: memfd_create (fileless execution) on ${name} scope (execution-from-memory policy, TDS 7.4) — comm $(sbob.comm), exe $(sbob.exe)`,
+    description: (name) =>
+      `SBoB signature: memfd_create (fileless execution) on ${name} scope (execution-from-memory policy, TDS 7.4) — comm $(audit.command), exe $(audit.exe)`,
   },
 ];
 
-/** Sensitive-path watchlist for the sensitive-file-access overlay (TDS 7.4). */
-export const SENSITIVE_PATH_REGEX =
-  "^(?:/etc/(?:shadow|gshadow|sudoers)(?:\\.d/\\S+)?|/root/\\.ssh/\\S+|/home/[^/]+/\\.ssh/\\S+|/etc/ssh/\\S+_key\\S*|\\S*/id_(?:rsa|ed25519|ecdsa)(?:\\.pub)?)$";
-
-/** k8s service-account token mount (projected volume path, TDS 7.4). */
-export const SA_TOKEN_PATH_REGEX = "^/var/run/secrets/kubernetes\\.io/serviceaccount/(?:token|ca\\.crt|namespace)$";
-
 /**
- * Default kubeadm service CIDR 10.96.0.0/12 as a PCRE2 (the API server VIP
- * lives in it). Parameterizing the CIDR per cluster is an M5 deploy-repo knob.
+ * Sensitive-path watchlist for the sensitive-file-access overlay (TDS 7.4),
+ * QUOTE-ANCHORED on the shipped audit.directory.name field: PATH records
+ * decode name="…" WITH the surrounding quotes on wazuh 4.14.
  */
-export const K8S_SERVICE_CIDR_REGEX = "^10\\.(?:9[6-9]|10[0-9]|11[01])\\.[0-9]{1,3}\\.[0-9]{1,3}$";
+export const SENSITIVE_PATH_REGEX =
+  '^"(?:/etc/(?:shadow|gshadow|sudoers)(?:\\.d/[^"]+)?|/root/\\.ssh/[^"]+|/home/[^/]+/\\.ssh/[^"]+|/etc/ssh/[^"]*_key[^"]*|[^"]*/id_(?:rsa|ed25519|ecdsa)(?:\\.pub)?)"$';
+
+/** k8s service-account token mount (projected volume path, TDS 7.4), quoted form. */
+export const SA_TOKEN_PATH_REGEX =
+  '^"/var/run/secrets/kubernetes\\.io/serviceaccount/(?:token|ca\\.crt|namespace)"$';
 
 // ---------------------------------------------------------------------------
 // rulePolicies helpers
@@ -131,7 +156,7 @@ export function exemptComms(ir: IR, policy: string): string[] {
 }
 
 export function exemptListPath(name: string, policy: string): string {
-  return `sbob/${name}/sigexempts/${policy}`;
+  return `${LIST_PREFIX}sbob/${name}/sigexempts/${policy}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +201,7 @@ export function signatureExemptListFiles(ir: IR, name: string): BundleFile[] {
       path: `wazuh/lists/sbob/${name}/sigexempts/${policy}`,
       content: [
         `# sbob signature exemption list — policy: ${policy} (rulePolicies.processAllowed)`,
-        `# key = comm, exact CDB match; workload: ${name}`,
+        `# key = comm (evaluated on the shipped audit.command field), exact CDB match; workload: ${name}`,
         "",
         ...comms.map((c) => `${c}:1`),
         "",
@@ -197,38 +222,41 @@ function rawId(alloc: IdAllocator, section: number, variant: number): number {
 
 /**
  * Shared signature rules for the linux and k8s-node targets: the four
- * audit-keyed policies in section 6 plus the opens/egress overlays in the
- * base section. `emitted` is the rule set assembled so far — overlay parents
- * must exist (section drift rules are conditional on SBoB content).
+ * audit-keyed policies in section 6 plus the opens overlays in the base
+ * section (wazuh 4.14 schema: shipped audit fields, CDB-on-audit.command
+ * exemptions, quote-anchored path overlays). `emitted` is the rule set
+ * assembled so far — overlay parents must exist (section drift rules are
+ * conditional on SBoB content).
  */
 export function signatureRulesShared(ir: IR, alloc: IdAllocator, emitted: XmlRule[]): XmlRule[] {
   const name = ir.workload.name;
   const rules: XmlRule[] = [];
   const has = (id: number) => emitted.some((r) => r.id === id);
-  const groups = (tag: string) => ["sbob", name, tag];
+  const groups = (tag: string) => [["sbob", name, tag]];
 
   // (6,0)-(6,3): audit-keyed signature policies ----------------------------
   const kinds = ["base", "drift", "escalation", "info"] as const; // variant digits 0-3
   for (let i = 0; i < AUDIT_KEYED_POLICIES.length; i++) {
-    const p = AUDIT_KEYED_POLICIES[i];
+    const p = AUDIT_KEYED_POLICIES[i]!;
     if (policySuppressed(ir, p.name)) continue;
     const id = alloc.linux("rulePolicies", kinds[i]);
     const rule: XmlRule = {
       id,
       level: p.level,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.key", regex: `^${p.auditKey}$` }],
+      ifGroup: SHIPPED_AUDIT_GROUP,
+      fields: [{ name: AUDIT_KEY, regex: `^${p.auditKey}$` }],
       description: p.description(name),
-      groups: [groups(p.groupTag), ["sbob", name, "sbob-signature"]],
+      groups: [...groups(p.groupTag), ["sbob", name, "sbob-signature"]],
       mitre: [p.mitre],
       options: ["no_full_log"],
       comment:
-        "node-scoped key (Mode B): fires for any process; on k8s nodes the cgroup decoders stamp sbob.pod_uid " +
-        "for attribution. Fires by default — exemptions via rulePolicies.processAllowed (TDS 6.2)",
+        "node-scoped key (Mode B): fires for any process riding the shipped auditd decoder family under the shipped 'audit' group — " +
+        "k8s attribution relies on Mode A exe-scoped keys (tier 2); tier-1 cgroup attribution is INERT on wazuh 4.14.6 (the shipped auditd family preempts custom audit roots). " +
+        "Fires by default — exemptions via rulePolicies.processAllowed (audit.command CDB)",
     };
     const comms = exemptComms(ir, p.name);
     if (comms.length > 0) {
-      rule.list = { field: "sbob.comm", lookup: "not_match_key", src: exemptListPath(name, p.name) };
+      rule.list = { field: AUDIT_COMMAND, lookup: "not_match_key", src: exemptListPath(name, p.name) };
     }
     rules.push(rule);
   }
@@ -241,56 +269,63 @@ export function signatureRulesShared(ir: IR, alloc: IdAllocator, emitted: XmlRul
         id: alloc.linux("base", "drift"), // (0,1)
         level: 12,
         ifSid: opensDriftId,
-        fields: [{ name: "sbob.path", regex: SENSITIVE_PATH_REGEX }],
-        description: `SBoB signature: sensitive file $(sbob.path) accessed (sensitive-file-access policy, TDS 7.4)`,
-        groups: [groups("sbob-sig-sensitive-file-access"), ["sbob", name, "sbob-signature", "file-access"]],
+        fields: [{ name: AUDIT_PATH, regex: SENSITIVE_PATH_REGEX }],
+        description: `SBoB signature: sensitive file $(audit.directory.name) accessed (sensitive-file-access policy, TDS 7.4)`,
+        groups: [...groups("sbob-sig-sensitive-file-access"), ["sbob", name, "sbob-signature", "file-access"]],
         mitre: ["T1552.001"],
         options: ["no_full_log"],
-        comment: "severity-raising overlay on the opens drift rule; watchlist per TDS 7.4",
+        comment: "severity-raising overlay on the opens drift rule; watchlist per TDS 7.4, quote-anchored (audit.directory.name carries its quotes)",
       };
       const comms = exemptComms(ir, "sensitive-file-access");
       if (comms.length > 0) {
-        rule.list = { field: "sbob.comm", lookup: "not_match_key", src: exemptListPath(name, "sensitive-file-access") };
+        rule.list = { field: AUDIT_COMMAND, lookup: "not_match_key", src: exemptListPath(name, "sensitive-file-access") };
       }
       rules.push(rule);
+      // (0,9) sustained-signature child of the OVERLAY (issue #42): on wazuh
+      // 4.14 the if_matched_sid correlation context only accumulates while the
+      // parent WINS the matched-rule selection, so the drift-parent sustained
+      // rule ((2,2)) never fires once this level-12 overlay wins the event.
+      // Repeated sensitive-file access needs its own correlation child.
+      rules.push({
+        id: alloc.linux("base", "sustained"), // (0,9)
+        level: 13,
+        ifMatchedSid: rule.id,
+        sameField: { name: AUDIT_PATH },
+        frequency: 8,
+        timeframe: 120,
+        description: `SBoB sustained signature: repeated sensitive-file access $(audit.directory.name) on ${name} (8 in 120s) — sustained exfil pattern (sensitive-file-access policy, TDS 7.4)`,
+        groups: [...groups("sbob-sig-sensitive-file-access"), ["sbob", name, "sbob-signature", "file-access", "sustained"]],
+        options: ["no_full_log"],
+        comment:
+          "chains off the overlay (0,1), not the drift parent: wazuh 4.14 correlation context accumulates only while the parent rule WINS the matched-rule selection, " +
+          "and the level-12 overlay always outscores the level-9 drift rule; the drift-parent variant (2,2) covers non-sensitive repetition",
+      });
     }
     if (!policySuppressed(ir, "service-account-token-access")) {
       const rule: XmlRule = {
         id: alloc.linux("base", "escalation"), // (0,2)
         level: 12,
         ifSid: opensDriftId,
-        fields: [{ name: "sbob.path", regex: SA_TOKEN_PATH_REGEX }],
-        description: `SBoB signature: service-account token material $(sbob.path) read (service-account-token-access policy, TDS 7.4)`,
-        groups: [groups("sbob-sig-sa-token-access"), ["sbob", name, "sbob-signature", "credential-access"]],
+        fields: [{ name: AUDIT_PATH, regex: SA_TOKEN_PATH_REGEX }],
+        description: `SBoB signature: service-account token material $(audit.directory.name) read (service-account-token-access policy, TDS 7.4)`,
+        groups: [...groups("sbob-sig-sa-token-access"), ["sbob", name, "sbob-signature", "credential-access"]],
         mitre: ["T1552.001"],
         options: ["no_full_log"],
         comment: "k8s projected SA volume; chain with kubernetes-api-access alerts for credential misuse (TDS 7.4)",
       };
       const comms = exemptComms(ir, "service-account-token-access");
       if (comms.length > 0) {
-        rule.list = { field: "sbob.comm", lookup: "not_match_key", src: exemptListPath(name, "service-account-token-access") };
+        rule.list = { field: AUDIT_COMMAND, lookup: "not_match_key", src: exemptListPath(name, "service-account-token-access") };
       }
       rules.push(rule);
     }
   }
 
-  // (0,3): egress-drift overlay (kubernetes API connect) ----------------------
-  const egressDriftId = rawId(alloc, SECTION_CODES.egress, 1);
-  if (has(egressDriftId) && !policySuppressed(ir, "kubernetes-api-access")) {
-    rules.push({
-      id: alloc.linux("base", "info"), // (0,3)
-      level: 12,
-      ifSid: egressDriftId,
-      fields: [{ name: "sbob.dst_ip", regex: K8S_SERVICE_CIDR_REGEX }],
-      description: `SBoB signature: undeclared connect into the k8s service CIDR $(sbob.dst_ip) (kubernetes-api-access policy, TDS 7.4)`,
-      groups: [groups("sbob-sig-kubernetes-api-access"), ["sbob", name, "sbob-signature", "egress-traffic"]],
-      mitre: ["T1613"],
-      options: ["no_full_log"],
-      comment:
-        "default kubeadm service CIDR 10.96.0.0/12 (API server VIP); cluster-specific CIDR is an M5 deploy-repo knob. " +
-        "Manager-side k8s audit-log rule for this policy lands with the k8s-node target (TDS 4.4)",
-    });
-  }
+  // (0,3) egress-drift overlay (kubernetes-api connect into the service CIDR):
+  // DELETED on wazuh 4.14 — analysisd rejects PCRE2 conditions on the STATIC
+  // srcip field ("Field 'srcip' is static") while <list> on static fields is
+  // allowed. The kubernetes-api-access policy rides the manager-side k8s
+  // audit-log JSON rule (6,4) instead; signatureCoverageNotes documents this.
 
   return rules;
 }
@@ -303,7 +338,7 @@ export function signatureRulesK8s(ir: IR, alloc: IdAllocator, lifecycleRuleId: n
   const name = ir.workload.name;
   const ns = ir.workload.namespace;
   const rules: XmlRule[] = [];
-  const groups = (tag: string) => ["sbob", name, tag];
+  const groups = (tag: string) => [["sbob", name, tag]];
 
   // (6,4): manager-side kubernetes-api-access (k8s API audit log, TDS 4.4/7.4)
   if (!policySuppressed(ir, "kubernetes-api-access")) {
@@ -315,12 +350,14 @@ export function signatureRulesK8s(ir: IR, alloc: IdAllocator, lifecycleRuleId: n
         { name: "object.objectRef.resource", regex: "^(?:secrets|configmaps)$" },
       ],
       description: `SBoB signature: ${ns}/${name} service account read secrets/configmaps via the k8s API (kubernetes-api-access policy, TDS 7.4)`,
-      groups: [groups("sbob-sig-kubernetes-api-access"), ["sbob", name, "sbob-signature", "credential-access"]],
+      groups: [...groups("sbob-sig-kubernetes-api-access"), ["sbob", name, "sbob-signature", "credential-access"]],
       mitre: ["T1552.001"],
       options: ["no_full_log"],
       comment:
         "evaluates the k8s API server audit log (wazuh/manager/sbob/k8s-api-audit.md ingestion path; TDS 4.4) " +
-        "through the shipped json decoder; the connect-side overlay (0,3) covers the node egress footprint",
+        "through the shipped json decoder. The node-side connect overlay (0,3) is NOT emitted on wazuh 4.14: srcip is a " +
+        "STATIC field, so a PCRE2 CIDR condition on it fails analysisd (list lookups on static fields ARE allowed — " +
+        "see the egress drift rule)",
     });
   }
 
@@ -331,7 +368,7 @@ export function signatureRulesK8s(ir: IR, alloc: IdAllocator, lifecycleRuleId: n
       level: 3,
       ifSid: lifecycleRuleId,
       description: `SBoB signature: container started from the workload image — verify declared image digest, then correlate exec-drift alerts (100011-band) with image contents (binary-not-in-container-image policy, TDS 7.4)`,
-      groups: [groups("sbob-sig-binary-not-in-image"), ["sbob", name, "sbob-signature", "container-lifecycle"]],
+      groups: [...groups("sbob-sig-binary-not-in-image"), ["sbob", name, "sbob-signature", "container-lifecycle"]],
       options: ["no_full_log"],
       comment:
         "cross-event correlation (docker lifecycle + exec drift timestamps) is a triage procedure, not a single-event " +
@@ -358,9 +395,13 @@ export function signatureCoverageNotes(ir: IR): string[] {
     }
     const exempted = Object.entries(rp).filter(([, p]) => (p.processAllowed ?? []).length > 0).map(([k]) => k);
     if (exempted.length > 0) {
-      notes.push(`rulePolicies: processAllowed comm exemptions emitted for: ${exempted.join(", ")} (CDB sigexempts lists)`);
+      notes.push(`rulePolicies: processAllowed comm exemptions emitted for: ${exempted.join(", ")} (CDB sigexempts lists on audit.command)`);
     }
   }
-  notes.push("signatures: audit keys are node-scoped (Mode B, attribution-weak) — declare processAllowed for container runtimes and node daemons (kubelet, containerd) to suppress expected noise");
+  notes.push(
+    "signatures: audit keys are node-scoped (Mode B, attribution-weak) — declare processAllowed for container runtimes and node daemons (kubelet, containerd) to suppress expected noise",
+    "signatures: the kubernetes-api-access node-side connect overlay (0,3) is not emitted on wazuh 4.14 — srcip is a static field and analysisd rejects PCRE2 conditions on static fields (CDB <list> on static fields IS allowed; that is how the egress drift rule works). The policy is carried by the manager-side k8s audit-log rule (6,4)",
+    "signatures: sensitive-file overlay repetition escalates via the (0,9) sustained-signature child; the SA-token overlay (0,2) has no dedicated sustained child on the band — triage uses firedtimes (issue #42)",
+  );
   return notes;
 }

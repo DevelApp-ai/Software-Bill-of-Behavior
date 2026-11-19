@@ -1,3 +1,3 @@
-# execs allowlist (exact entries); wildcard entries live in the rules XML
+# execs allowlist (exact entries); wildcard entries live in the rules XML — key=exe path, value=1
 /usr/bin/redis-server:1
 /bin/sh:1

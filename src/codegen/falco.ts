@@ -34,7 +34,7 @@ import type { IR } from "../types.ts";
 import type { BundleFile } from "./linux.ts";
 import { engineManifest, pathGlob } from "./engines.ts";
 import type { XmlRule } from "./xml.ts";
-import { renderRule, xmlFileHeader } from "./xml.ts";
+import { renderRuleFile, xmlFileHeader } from "./xml.ts";
 
 export function generateFalcoBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
   const files: BundleFile[] = [];
@@ -237,16 +237,15 @@ export function generateFalcoBundle(ir: IR, alloc: IdAllocator): BundleFile[] {
     };
     files.push({
       path: `wazuh/rules/sbob/${100000 + alloc.slot * 100}_${name}_falco.xml`,
-      content: [
+      content: renderRuleFile(
         xmlFileHeader(
           `sbobctl generated falco correlation rule — workload: ${name}`,
           name,
           `requires the falco JSON ingestion path (wazuh/manager/sbob/${name}-falco.md)`,
         ),
-        "",
-        renderRule(rule),
-        "",
-      ].join("\n"),
+        ["sbob", name],
+        [rule],
+      ),
     });
   }
 

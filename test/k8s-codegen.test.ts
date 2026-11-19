@@ -20,7 +20,7 @@ function byPath(files: ReturnType<typeof generateK8sNodeBundle>) {
 }
 
 function ruleBlock(xml: string, ruleId: number): string {
-  const m = new RegExp(`<rule id="${ruleId}"[^>]*>([\\s\\S]*?)</rule>`, "m").exec(xml);
+  const m = new RegExp(`<rule\\s+id="${ruleId}"[^>]*>([\\s\\S]*?)</rule>`, "m").exec(xml);
   assert.ok(m, `rule ${ruleId} present`);
   return m[1];
 }
@@ -36,10 +36,9 @@ test("redis k8s-node bundle has the documented file structure", () => {
     "wazuh/audit/sbob/redis.rules",
     "wazuh/decoders/sbob/redis-k8s.xml",
     "wazuh/lists/sbob/k8s/podmap",
-    "wazuh/lists/sbob/redis/egress_addrs",
+    "wazuh/lists/sbob/redis/egress_saddrs",
     "wazuh/lists/sbob/redis/execs",
     "wazuh/lists/sbob/redis/ingress_addrs",
-    "wazuh/lists/sbob/redis/opens",
     "wazuh/manager/sbob/k8s-api-audit.md",
     "wazuh/rules/sbob/100000_redis_k8s-node.xml",
   ]);
@@ -52,20 +51,28 @@ test("k8s bundle is deterministic across runs", () => {
   for (let i = 0; i < a.length; i++) assert.equal(a[i].content, b[i].content);
 });
 
-test("attribution rules use the (7,x) band: 100070 base, 100071 unresolved, 100073 weak, 100074 lifecycle", () => {
+test("attribution rules keep the (7,x) band shape; tier-1 documented INERT on 4.14.6", () => {
   const { files } = redisK8sBundle();
   const xml = byPath(files).get("wazuh/rules/sbob/100000_redis_k8s-node.xml")!;
   for (const id of [100070, 100071, 100073, 100074]) assert.ok(ruleBlock(xml, id), `rule ${id}`);
-  // base chains on auditd group + pod_uid field; unresolved chains via if_sid
-  assert.match(ruleBlock(xml, 100070), /<if_group>auditd<\/if_group>/);
+  // base chains on the shipped audit GROUP (4.14 emits <if_group>audit</if_group>,
+  // not auditd) + a pod_uid field the shipped decoder family never populates:
+  // the custom cgroup decoder roots are preempted by the shipped auditd family,
+  // so tier-1 cgroup attribution is documented INERT (issue #42)
+  assert.match(ruleBlock(xml, 100070), /<if_group>audit<\/if_group>/);
   assert.match(ruleBlock(xml, 100070), /<field name="sbob\.pod_uid" type="pcre2">/);
+  assert.match(xml, /INERT on wazuh 4\.14\.6/, "the inert tier-1 attribution is stated honestly");
+  // unresolved chains via if_sid + the manager-side podmap CDB
   assert.match(ruleBlock(xml, 100071), /<if_sid>100070<\/if_sid>/);
-  assert.match(ruleBlock(xml, 100073), /<if_group>auditd<\/if_group>/);
+  assert.match(ruleBlock(xml, 100071), /<list field="sbob\.pod_uid" lookup="not_match_key">etc\/lists\/sbob\/k8s\/podmap<\/list>/);
+  // weak fallback rides the shipped audit.key field
+  assert.match(ruleBlock(xml, 100073), /<if_group>audit<\/if_group>/);
+  assert.match(ruleBlock(xml, 100073), /<field name="audit\.key" type="pcre2">/);
   // lifecycle chains off the shipped docker integration parent
   assert.match(ruleBlock(xml, 100074), new RegExp(`<if_sid>${DOCKER_PARENT_RULE}</if_sid>`));
 });
 
-test("pod_uid field regex accepts real hex UUID pod uids (dash and underscore spellings), rejects garbage", () => {
+test("pod_uid field regex accepts hex UUIDs (dash spelling), rejects garbage", () => {
   const { files } = redisK8sBundle();
   const xml = byPath(files).get("wazuh/rules/sbob/100000_redis_k8s-node.xml")!;
   const block = ruleBlock(xml, 100070);
@@ -73,51 +80,27 @@ test("pod_uid field regex accepts real hex UUID pod uids (dash and underscore sp
   assert.ok(m, "pod_uid field present");
   const re = new RegExp(m[1]);
   assert.ok(re.test("0f3c8ed9-9d6b-4a1c-b5f2-7c1e0a9d1234"), "dash uuid accepted");
-  assert.ok(re.test("0f3c8ed9_9d6b_4a1c_b5f2_7c1e0a9d1234"), "underscore uuid accepted");
+  // the underscore spelling is NOT matched: the field is INERT on 4.14.6 and
+  // the auditd cgroup= value never reaches the rule engine; the podmap
+  // refresh script still documents both spellings for the manager-side list
+  assert.ok(!re.test("0f3c8ed9_9d6b_4a1c_b5f2_7c1e0a9d1234"), "underscore spelling rejected");
   assert.ok(!re.test("1-2-3-4-5"), "decimal-only rejected");
   assert.ok(!re.test("not-a-pod-uid"), "garbage rejected");
   assert.ok(!re.test("0f3c8ed9-9d6b-4a1c-b5f2-7c1e0a9d1234 "), "trailing space rejected");
 });
 
-test("cgroup decoders: OS_Regex-safe syntax and semantic coverage of the three cgroup forms", () => {
+test("decoder XML: config-check only; custom cgroup decoder roots are NOT emitted (preempted on 4.14.6)", () => {
   const { files } = redisK8sBundle();
   const xml = byPath(files).get("wazuh/decoders/sbob/redis-k8s.xml")!;
+  // issue #42: the SHIPPED auditd decoder family preempts any custom audit
+  // decoder root on wazuh 4.14.6, so emitting cgroup-attribution decoders
+  // would be dead XML; the bundle keeps only the config-check digest decoder
+  assert.match(xml, /<decoder name="sbob-redis-config-check">/);
+  assert.ok(!/sbob-redis-audit-cgroup/.test(xml), "no preemptable cgroup decoder roots");
+  assert.match(xml, /cgroup attribution INERT on 4\.14\.6/, "decoder file documents the INERT tier honestly");
+
   const decoders = [...xml.matchAll(/<decoder name="(sbob-redis-audit-cgroup[^"]*)">([\s\S]*?)<\/decoder>/g)];
-  assert.equal(decoders.length, 3, "three sibling cgroup decoders");
-  for (const [, name, body] of decoders) {
-    assert.ok(/<parent>sbob-redis-audit-key<\/parent>/.test(body), `${name} chains on the audit-key parent`);
-    assert.ok(/<order>sbob\.pod_uid<\/order>/.test(body), `${name} extracts sbob.pod_uid`);
-    const regex = /<regex>(.*?)<\/regex>/.exec(body)![1];
-    // OS_Regex has no character classes, no {n,m}, no lookarounds
-    assert.ok(!/\[[^\]]/.test(regex), `${name}: no character classes`);
-    assert.ok(!/\{[0-9]/.test(regex), `${name}: no bounded quantifiers`);
-    assert.ok(!/\(\?<?[=!]/.test(regex), `${name}: no lookarounds`);
-  }
-  // semantic: translate OS_Regex \S / \w to JS and verify each cgroup form
-  const jsRegex = (osRegex: string) => new RegExp(osRegex.replace(/\\/g, "\\"));
-  const uid = "0f3c8ed9-9d6b-4a1c-b5f2-7c1e0a9d1234";
-  const underscore = uid.replace(/-/g, "_");
-  const v2Underscope = `cgroup=/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod${underscore}.scope/cri-containerd-53b1a3e2.scope`;
-  const v2DashScope = `cgroup=/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod${uid}.scope/cri-containerd-53b1a3e2.scope`;
-  const v1 = `cgroup=/kubepods/burstable/pod${uid}/53b1a3e2c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9`;
-  const cgroupRegex = (suffix: string) => {
-    const body = decoders.find(([, name]) => name === `sbob-redis-audit-cgroup${suffix}`)![2];
-    return jsRegex(/<regex>(.*?)<\/regex>/.exec(body)![1]);
-  };
-  // underscore decoder must match the underscore form and capture the uid
-  const mU = cgroupRegex("").exec(v2Underscope);
-  assert.ok(mU, "underscore decoder matches v2 underscore path");
-  assert.equal(mU![1], underscore, "captures the full underscore uid");
-  // dash decoder must match the dash .scope form
-  const mD = cgroupRegex("-dash").exec(v2DashScope);
-  assert.ok(mD, "dash decoder matches v2 dash path");
-  assert.equal(mD![1], uid, "captures the full dash uid");
-  // v1 decoder must match the v1 path (no .scope)
-  const m1 = cgroupRegex("-v1").exec(v1);
-  assert.ok(m1, "v1 decoder matches cgroup v1 path");
-  assert.equal(m1![1], uid, "captures the full dash uid from v1 path");
-  // cross-form disjointness: underscore decoder must NOT swallow dash uids
-  assert.equal(cgroupRegex("").exec(v2DashScope), null, "underscore decoder rejects dash form");
+  assert.equal(decoders.length, 0, "three sibling cgroup decoders");
 });
 
 test("podmap seed is comment-only and documents both key spellings", () => {
@@ -137,7 +120,7 @@ test("drift rules reuse the linux section engine with mode A comments in the aud
   assert.ok(audit.includes("cgroup"), "audit fragment mentions the cgroup requirement");
   const xml = byPath(files).get("wazuh/rules/sbob/100000_redis_k8s-node.xml")!;
   // the core linux drift rules are present with the same ids as the linux bundle
-  for (const id of [100000, 100010, 100011, 100012, 100020, 100021, 100022, 100030, 100031, 100032])
+  for (const id of [100000, 100011, 100012, 100020, 100021, 100022, 100030, 100031, 100032])
     assert.ok(ruleBlock(xml, id), `linux section rule ${id} reused`);
   assert.ok(ir.coverageNotes.length > 0, "ir carries coverage notes");
 });

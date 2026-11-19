@@ -347,7 +347,7 @@ test("active responses: disabled unless the section enforces", () => {
 test("telemetry rule: (11,1) -> 100111, fires on the enforce localfile", () => {
   const f = enforceTelemetryRule(redisIR(), makeAllocator("redis", 0));
   assert.ok(f.path.endsWith("100000_redis_enforce.xml"));
-  assert.ok(f.content.includes('<rule id="100111" level="10">'));
+  assert.ok(f.content.includes('<rule  id="100111" level="10">'));
   assert.ok(f.content.includes('^redis$'));
   assert.ok(f.content.includes("^process-kill(?:-revert|-failed)?$|^firewall-drop$"));
   assert.ok(f.content.includes("sbob-enforce.log"));

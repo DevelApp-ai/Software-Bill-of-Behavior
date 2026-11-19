@@ -1,0 +1,5 @@
+# egress saddr allowlist — key=sockaddr hex spelling (padded 32-hex AND truncated 16-hex forms per peer ip:port; wazuh 4.14 decodes SOCKADDR saddr= into the STATIC srcip field), value=identifier
+020000350A60000A:egress-peer
+020000350A60000A0000000000000000:egress-peer
+020001BBA200D9AB:egress-peer
+020001BBA200D9AB0000000000000000:egress-peer

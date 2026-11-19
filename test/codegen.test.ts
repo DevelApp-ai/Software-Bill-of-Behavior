@@ -33,10 +33,9 @@ test("redis bundle has the documented file structure", () => {
     "wazuh/agent-conf/sbob/redis.xml",
     "wazuh/audit/sbob/redis.rules",
     "wazuh/decoders/sbob/redis.xml",
-    "wazuh/lists/sbob/redis/egress_addrs",
+    "wazuh/lists/sbob/redis/egress_saddrs",
     "wazuh/lists/sbob/redis/execs",
     "wazuh/lists/sbob/redis/ingress_addrs",
-    "wazuh/lists/sbob/redis/opens",
     "wazuh/rules/sbob/100000_redis_linux.xml",
   ]);
 });
@@ -109,56 +108,84 @@ test("audit fragment: Mode A exe-scoped execve for every declared exe", () => {
   assert.ok(!audit.includes("-k sbob-exec\n"), "no unscoped Mode B key");
 });
 
-test("CDB lists: exact entries only; wildcards live in rule regexes", () => {
+test("CDB lists: exact entries only; wildcards live in rule regexes (issue #42 shape)", () => {
   const m = byPath(redisBundle());
   const execs = m.get("wazuh/lists/sbob/redis/execs")!;
-  assert.ok(execs.includes("/usr/bin/redis-server:"));
-  assert.ok(execs.includes("/bin/sh:"));
-  const opens = m.get("wazuh/lists/sbob/redis/opens")!;
-  assert.ok(opens.includes("/etc/resolv.conf:"));
-  assert.ok(!opens.includes("/data"), "wildcarded /data/* is not a CDB entry");
-  const egress = m.get("wazuh/lists/sbob/redis/egress_addrs")!;
-  assert.ok(egress.includes("10.96.0.10/32:cluster-dns"));
-  assert.ok(egress.includes("162.0.217.171/32:stripe-api"));
+  assert.ok(execs.includes("/usr/bin/redis-server:1"));
+  assert.ok(execs.includes("/bin/sh:1"));
+  // NO opens list on 4.14: audit.directory.name decodes quote-wrapped, and
+  // quoted CDB keys are fragile — exact opens are compiled into the rule
+  // regexes and wildcard entries stay there too
+  assert.ok(!m.has("wazuh/lists/sbob/redis/opens"), "opens list is gone (quote-wrapped field)");
+  // egress keys are the saddr hex spellings of the declared peers (both padded
+  // 32-hex and truncated 16-hex forms): wazuh 4.14 decodes SOCKADDR saddr=
+  // into the STATIC srcip field, and PCRE2 conditions on static fields are
+  // rejected by analysisd while list lookups are allowed
+  const egress = m.get("wazuh/lists/sbob/redis/egress_saddrs")!;
+  assert.ok(egress.includes("020000350A60000A:".split(":")[0]), "10.96.0.10:53 padded-16 hex key");
+  assert.ok(egress.includes("020001BBA200D9AB"), "162.0.217.171:443 truncated hex key");
+  assert.ok(egress.includes("020001BBA200D9AB0000000000000000"), "padded 32-hex spelling");
   const ingress = m.get("wazuh/lists/sbob/redis/ingress_addrs")!;
   assert.ok(ingress.includes("10.244.0.0/16:app-clients"));
 });
 
-test("rule XML: base/drift/sustained chain with correct ids and lookups", () => {
+test("rule XML: base/drift/sustained chain with correct ids and lookups (wazuh 4.14 schema)", () => {
   const xml = byPath(redisBundle()).get("wazuh/rules/sbob/100000_redis_linux.xml")!;
-  // execs drift: CDB not_match_key over the exact list
-  assert.ok(xml.includes('<rule id="100011"'));
-  assert.ok(xml.includes('lookup="not_match_key"'), "negated CDB lookup present");
-  // opens drift: negated-alternation regex for wildcarded /data/* + CDB for exact
-  assert.ok(xml.includes('<rule id="100021"'));
-  assert.ok(xml.includes("^(?!(?:/data/[^/]+(?:/[^/]+)*)$)"), "negated allow-alternation present");
-  // egress drift: negated port alternation + address list lookup
-  assert.ok(xml.includes('<rule id="100031"'));
-  assert.ok(xml.includes("^(?!(?:53|443)$)"), "port allowlist alternation present");
-  assert.ok(xml.includes('lookup="not_address_match_key"'), "address CDB lookup present");
-  // sustained escalation children
-  assert.ok(xml.includes('<rule id="100012"'));
-  assert.ok(xml.includes("<frequency>8</frequency>"));
+  // rules ride the SHIPPED auditd decoder family (if_group audit + audit.* fields)
+  assert.ok(xml.includes('<rule  id="100000"'));
+  assert.ok(xml.includes('<field name="audit.key" type="pcre2">^sbob-exec(?:-redis)?$</field>'));
+  // execs drift: CDB not_match_key over the exact list on audit.exe
+  assert.ok(xml.includes('<rule  id="100011"'));
+  assert.ok(xml.includes('<list field="audit.exe" lookup="not_match_key">etc/lists/sbob/redis/execs</list>'));
+  // opens drift: quote-anchored negated alternation (audit.directory.name keeps
+  // its quotes); NO opens CDB list
+  assert.ok(xml.includes('<rule  id="100021"'));
+  assert.ok(xml.includes(`^"(?!/etc/resolv\\.conf"$|/data/[^/"]+(?:/[^/"]+)*"$)[^"]+"$`), "quote-anchored negated allow-alternation present");
+  assert.ok(!xml.includes("lists/sbob/redis/opens"), "no opens CDB reference");
+  // egress drift: CDB on the STATIC srcip field (list lookups on static fields
+  // are allowed; PCRE2 on static fields is not) keyed by saddr hex spellings
+  assert.ok(xml.includes('<rule  id="100031"'));
+  assert.ok(xml.includes('<list field="srcip" lookup="not_match_key">etc/lists/sbob/redis/egress_saddrs</list>'));
+  // sustained escalation children: frequency/timeframe are RULE ATTRIBUTES on
+  // 4.14, children chain via if_matched_sid + same_field/same_srcip
+  assert.ok(xml.includes('<rule  id="100012" level="13" frequency="8" timeframe="120">'), "frequency/timeframe as rule attributes");
+  assert.ok(xml.includes("<if_matched_sid>100011</if_matched_sid>"));
+  assert.ok(xml.includes("<same_field>audit.exe</same_field>"));
+  assert.ok(xml.includes('<rule  id="100032" level="13" frequency="8" timeframe="120">'));
+  assert.ok(xml.includes("<same_srcip />"));
+  assert.ok(!xml.includes("<frequency>"), "no legacy frequency element spelling");
+  // (0,9) overlay-sustained child (winner-context finding, issue #42): the
+  // level-12 sensitive-file overlay steals the winner slot from the level-9
+  // drift parent, so its repetition is escalated by a child of the OVERLAY
+  assert.ok(xml.includes('<rule  id="100009" level="13" frequency="8" timeframe="120">'));
+  assert.ok(xml.includes("<if_matched_sid>100001</if_matched_sid>"), "sustained sensitive-file repetition chains off the overlay");
   // MITRE mapping
   assert.ok(xml.includes("T1059"));
   assert.ok(xml.includes("T1005"));
   assert.ok(xml.includes("T1071"));
   // ingress is informational only on Linux (accept() attribution gap)
-  assert.ok(xml.includes('<rule id="100043"'));
+  assert.ok(xml.includes('<rule  id="100043"'));
   assert.ok(xml.includes("sbob-info"));
   // generated-bundle banner
   assert.ok(xml.includes("LAB VALIDATION PENDING"));
   assert.ok(xml.includes("do not edit by hand"));
   // description variables reference decoded fields
-  assert.ok(xml.includes("$(sbob.exe)"));
+  assert.ok(xml.includes("$(audit.exe)"));
+  // rules are wrapped in a <group> (bare-rule files fail the 4.14 loader)
+  assert.ok(xml.includes('<group name="sbob,redis">'));
 });
 
-test("decoder XML: chains SYSCALL and PATH records into sbob.* fields", () => {
+test("decoder XML: config-check only; audit lines ride the shipped auditd family", () => {
   const dec = byPath(redisBundle()).get("wazuh/decoders/sbob/redis.xml")!;
+  // issue #42: on wazuh 4.14.6 the SHIPPED auditd decoder family preempts any
+  // custom audit decoder root, so the bundle emits ONLY the config-check
+  // digest decoder and the rules ride audit.* fields from the shipped family
   assert.ok(dec.includes("<decoder"), "has decoders");
-  assert.ok(dec.includes("sbob.key"));
-  assert.ok(dec.includes("sbob.exe"));
-  assert.ok(dec.includes("sbob.path"));
+  assert.ok(dec.includes("sbob-redis-config-check"), "config-check decoder present");
+  assert.ok(dec.includes("sbob-audit-digest"), "command-wodle prematch present");
+  assert.ok(dec.includes("sbob.audit_digest"), "digest field order");
+  assert.ok(!dec.includes("sbob.key"), "no preemptable custom audit root decoders");
+  assert.ok(!/order>sbob\.(exe|path)/.test(dec), "no SYSCALL/PATH shadow decoders");
   assert.ok(dec.includes("LAB VALIDATION PENDING"));
 });
 

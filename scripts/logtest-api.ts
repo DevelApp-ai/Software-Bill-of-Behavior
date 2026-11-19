@@ -1,20 +1,35 @@
 #!/usr/bin/env node
 // ---------------------------------------------------------------------------
-// Wazuh detection-testing harness — API-driven corpus replay (issue #23)
+// Wazuh detection-testing harness — API-driven corpus replay (issues #23, #42)
 //
-// The wazuh-logtest CLI pipes are text-only and one-shot: they cannot assert
-// on structured rule output, and they cannot prove the SUSTAINED drift rules
-// (frequency 8 within 120s) because each corpus line lands in a fresh state.
-// The Wazuh server logtest API (Wazuh >= 4.4, <rule_test> enabled) fixes both:
+// The wazuh-logtest CLI pipes are text-only and text-asserted: they cannot
+// check structured rule output nor set log_format, and alone they cannot
+// prove the SUSTAINED drift rules (frequency 8 within 120s). The Wazuh
+// server logtest API (Wazuh >= 4.4, <rule_test> enabled) fixes both:
 //
-//   PUT  /logtest                   body {log, token?} -> JSON per line
+//   PUT  /logtest                   body {event, log_format, location,
+//                                   token?} -> JSON per line
 //   DEL  /logtest/sessions/{token}  close the session
 //
+// (The 4.14 LogtestRequest schema requires event + log_format + location and
+// accepts log_format: json, which is how the windows corpus replays through
+// the same session engine the live manager runs.)
+//
 // Session tokens are reused across requests, so `firedtimes` accumulates the
-// same way the live analysis engine does. Replaying the drift corpus eight
-// times inside ONE session makes the sustained-drift frequency children fire
-// exactly as they would in production (e.g. php-fpm slot 1: 100112/100122/
-// 100132 — the PHP2Shell scenario, docs/php2shell-scenario.md).
+// same way the live analysis engine does. Replaying the sustained corpus
+// (8 rounds per drift family, one session) makes the sustained-drift
+// frequency children fire exactly as they would in production.
+//
+// SUSTAINED vs WINNER-CONTEXT (wazuh 4.14 engine finding, issue #42):
+// the logtest display reports only the highest-level matched rule per line,
+// and if_matched_sid context only accumulates while the parent WINS that
+// selection. On the linux/k8s/php targets, the sensitive-file overlay
+// (level 12) outshadows the opens drift parent (level 9) on /etc/shadow
+// rounds, so the opens-sustained child is proven on the undeclared
+// rogue-open rounds and the overlay's own sustained child (100009/100109)
+// is proven on the shadow rounds. The dedicated sustained corpora encode
+// both round types — replaying the drift corpus 8x instead would leave the
+// opens-sustained child starved on linux/php.
 //
 // Usage (from a host that can reach the lab Wazuh server API):
 //   SBOB_WAZUH_API_PASS=... node scripts/logtest-api.ts --target php \
@@ -50,10 +65,16 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 export interface TargetSpec {
   benign: string;
   drift: string;
-  /** rule ids the drift corpus MUST fire */
+  /** logtest session log_format for this corpus family (4.14 API schema) */
+  logFormat: string;
+  /** session location label (informational in the session engine) */
+  location: string;
+  /** rule ids the drift corpus MUST fire (display = highest-level match) */
   driftIds: string[];
   /** frequency children (8 matches / 120s) proven by the sustained check */
   sustainedIds: string[];
+  /** dedicated sustained corpus (8 rounds per family); falls back to drift xN */
+  sustainedCorpus: string | null;
   /** informational rules allowed to alert on the benign corpus (k8s attribution) */
   attributionInfoIds: string[];
 }
@@ -62,30 +83,45 @@ export const TARGETS: Record<string, TargetSpec> = {
   linux: {
     benign: "test/corpus/redis-benign.audit",
     drift: "test/corpus/redis-drift.audit",
-    driftIds: ["100011", "100021", "100031", "100060", "100062"],
-    sustainedIds: ["100012", "100022", "100032"],
+    logFormat: "syslog",
+    location: "sbob-lab",
+    // 100001, NOT 100021: the sensitive-file overlay (level 12) outshadows
+    // the opens drift parent (level 9) — the drift open IS /etc/shadow.
+    driftIds: ["100011", "100001", "100031", "100060", "100062"],
+    sustainedIds: ["100012", "100022", "100032", "100009"],
+    sustainedCorpus: "test/corpus/redis-sustained.audit",
     attributionInfoIds: [],
   },
   windows: {
     benign: "test/corpus/redis-benign.win.jsonl",
     drift: "test/corpus/redis-drift.win.jsonl",
+    logFormat: "json",
+    location: "sbob-lab-win",
     driftIds: ["100016", "100006", "100026", "100036", "100007"],
-    sustainedIds: [], // M2 windows ruleset has no frequency children
+    sustainedIds: ["100017", "100027", "100037"],
+    sustainedCorpus: null, // replay the drift corpus 8x — windows has no overlay shadowing
     attributionInfoIds: [],
   },
   k8s: {
     benign: "test/corpus/redis-benign.k8s.audit",
     drift: "test/corpus/redis-drift.k8s.audit",
-    driftIds: ["100011", "100021", "100031", "100060", "100062"],
-    sustainedIds: ["100012", "100022", "100032"],
+    logFormat: "syslog",
+    location: "sbob-lab",
+    driftIds: ["100011", "100001", "100031", "100060", "100062"],
+    sustainedIds: ["100012", "100022", "100032", "100009"],
+    sustainedCorpus: "test/corpus/redis-sustained.audit",
+    // tier-1 cgroup attribution is INERT on 4.14.6 (informational only)
     attributionInfoIds: ["100070", "100071", "100073", "100074"],
   },
   // PHP2Shell scenario (CVE-2026-109618 / CVE-2026-109619) — php-fpm slot 1
   php: {
     benign: "test/corpus/php-benign.audit",
     drift: "test/corpus/php-drift.audit",
+    logFormat: "syslog",
+    location: "sbob-lab",
     driftIds: ["100111", "100121", "100131", "100163"],
-    sustainedIds: ["100112", "100122", "100132"],
+    sustainedIds: ["100112", "100122", "100132", "100109"],
+    sustainedCorpus: "test/corpus/php-sustained.audit",
     attributionInfoIds: [],
   },
 };
@@ -115,13 +151,16 @@ function dataOf(resp: unknown): Record<string, unknown> {
   return asRecord(r["data"]) ?? r;
 }
 
-/** rule record from data.rule.id, or from the alert object (data.alert.rule.id) */
-function ruleRecordOf(data: Record<string, unknown>): Record<string, unknown> | null {
+/** rule record from data.rule.id, data.alert.rule.id, or data.output.rule.id
+ *  (the 4.14 session reply nests the matched rule under `output`) */
+export function ruleRecordOf(data: Record<string, unknown>): Record<string, unknown> | null {
   const rule = asRecord(data["rule"]);
   if (rule !== null) return rule;
   const alert = asRecord(data["alert"]);
   const alertRule = alert === null ? null : asRecord(alert["rule"]);
-  return alertRule;
+  if (alertRule !== null) return alertRule;
+  const output = asRecord(data["output"]);
+  return output === null ? null : asRecord(output["rule"]);
 }
 
 /** the matched rule id, from the JSON field or the phase-3 text output */
@@ -217,7 +256,7 @@ function requestRaw(url: string, method: string, headers: Record<string, string>
   });
 }
 
-export function makeTransport(verifyTls: boolean): Transport {
+export function makeTransport(verifyTls: boolean, sessionLogFormat: string, sessionLocation: string): Transport {
   return {
     async login(api: string, user: string, pass: string): Promise<string> {
       const basic = Buffer.from(`${user}:${pass}`, "utf8").toString("base64");
@@ -235,7 +274,13 @@ export function makeTransport(verifyTls: boolean): Transport {
       return token;
     },
     async putLog(api: string, jwt: string, log: string, sessionToken: string | null): Promise<unknown> {
-      const payload = sessionToken === null ? { log } : { log, token: sessionToken };
+      // 4.14 LogtestRequest schema: {event, log_format, location, token?}
+      // (the log_format passthrough is what lets the windows json corpus hit
+      // the eventchain through the same session engine)
+      const payload =
+        sessionToken === null
+          ? { event: log, log_format: sessionLogFormat, location: sessionLocation }
+          : { event: log, log_format: sessionLogFormat, location: sessionLocation, token: sessionToken };
       const reply = await requestRaw(
         `${api}/logtest`,
         "PUT",
@@ -386,7 +431,7 @@ export async function main(): Promise<number> {
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
   const read = (p: string): string[] => corpusLines(readFileSync(join(repoRoot, p), "utf8"));
 
-  const transport = makeTransport(cfg.verifyTls);
+  const transport = makeTransport(cfg.verifyTls, spec.logFormat, spec.location);
   let jwt: string;
   try {
     jwt = await transport.login(cfg.api, cfg.user, cfg.pass!);
@@ -441,9 +486,13 @@ export async function main(): Promise<number> {
   // --- sustained: frequency children fire at 8 matches within the timeframe ---
   if (!cfg.skipSustained && spec.sustainedIds.length > 0) {
     console.log(`== [${cfg.target}] sustained check: expecting ${spec.sustainedIds.join(" ")} (${cfg.repeats} passes, one session) ==`);
+    const sustainedLines =
+      spec.sustainedCorpus === null
+        ? repeatLines(driftLines, cfg.repeats) // windows: drift 8x — no overlay shadowing
+        : read(spec.sustainedCorpus);
     let sustained: ReplayResult;
     try {
-      sustained = await replayCorpus(transport, cfg.api, jwt, repeatLines(driftLines, cfg.repeats));
+      sustained = await replayCorpus(transport, cfg.api, jwt, sustainedLines);
     } catch (e) {
       console.error(`ERROR: sustained replay transport failure — ${e instanceof Error ? e.message : String(e)}`);
       return 2;

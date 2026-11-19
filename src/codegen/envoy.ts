@@ -124,7 +124,7 @@ export function envoyRules(ir: IR, alloc: IdAllocator, name: string): XmlRule[] 
       id: alloc.linux("endpoints", d.kind), // (9,1) / (9,2)
       level: 9,
       fields: [{ name: "direction", regex: `^${d.dir}$` }],
-      list: { field: "path", lookup: "not_match_key", src: `sbob/${name}/${d.src}` },
+      list: { field: "path", lookup: "not_match_key", src: `etc/lists/sbob/${name}/${d.src}` },
       description:
         `SBoB drift: ${d.dir} HTTP request to an endpoint not declared in endpoints[] of ${name} (method and response code travel on the alert; TDS 13)`,
       groups: [["sbob", name, "sbob-drift", "l7-endpoint"]],

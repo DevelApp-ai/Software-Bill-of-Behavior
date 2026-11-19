@@ -185,7 +185,7 @@ test("falco bundle: lists, drift rules, daemonset, wazuh correlation rule 100103
   assert.match(ds, /ConfigMap/);
   assert.match(ds, /FALCOSIDEKICK_WAZUH_URL/);
   const xml = pick(files, "wazuh/rules/sbob/100000_redis_falco.xml");
-  assert.match(xml, /<rule id="100103" level="3">/);
+  assert.match(xml, /<rule\s+id="100103" level="3">/);
   assert.match(xml, /name="output_fields\.container\.name" type="pcre2">\^redis\$/);
   assert.match(pick(files, "wazuh/manager/sbob/redis-falco.md"), /localfile/);
 });
@@ -212,13 +212,13 @@ test("envoy: endpoints[] emits CDB allowlists, (9,1)/(9,2) rules and the ingesti
   assert.match(pick(files, "wazuh/lists/sbob/redis/endpoints_in"), /\/api\/v1\/ping:1/);
 
   const xml = files.find((f) => f.path.endsWith("_k8s-node.xml"))!.content;
-  const inbound = new RegExp(`<rule id="100091"[^>]*>([\\s\\S]*?)</rule>`, "m").exec(xml);
-  const outbound = new RegExp(`<rule id="100092"[^>]*>([\\s\\S]*?)</rule>`, "m").exec(xml);
+  const inbound = new RegExp(`<rule\\s+id="100091"[^>]*>([\\s\\S]*?)</rule>`, "m").exec(xml);
+  const outbound = new RegExp(`<rule\\s+id="100092"[^>]*>([\\s\\S]*?)</rule>`, "m").exec(xml);
   assert.ok(inbound, "endpoint inbound drift rule 100091");
   assert.ok(outbound, "endpoint outbound drift rule 100092");
   assert.ok(inbound[1]!.includes('<field name="direction" type="pcre2">^inbound$</field>'));
   assert.match(outbound[1]!, /sbob\/redis\/endpoints_out/);
-  assert.match(xml, /<rule id="100091" level="9">/);
+  assert.match(xml, /<rule\s+id="100091" level="9">/);
 
   assert.match(pick(files, "wazuh/manager/sbob/redis-envoy.md"), /json_format:/);
   assert.match(pick(files, "wazuh/manager/sbob/redis-envoy.md"), /ENVOY_L7/);

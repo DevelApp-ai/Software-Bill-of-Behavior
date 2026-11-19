@@ -5,4 +5,10 @@
 #         — because CDB lookups are exact-match; keep both lines per pod.
 # value = namespace/podname (carried for triage; TDS 6.3 tier 1)
 # maintained by scripts/sbob-podmap-refresh.sh (crictl or docker backend);
-# the manager loads it as a CDB list — restart the manager after refresh.
+# the manager loads it as a CDB list (<list>etc/lists/sbob/k8s/podmap</list>
+# in ossec.conf) — restart the manager after refresh.
+#
+# wazuh 4.14.6: TIER-1 ATTRIBUTION IS INERT — the shipped auditd decoder
+# family preempts custom audit ROOT decoders, so the cgroup= child decoders
+# that would stamp sbob.pod_uid never run. The podmap list and the (7,1)
+# rule are kept in shape for forward-compat (issue #42 documents this).

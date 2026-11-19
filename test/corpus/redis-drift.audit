@@ -21,6 +21,6 @@ type=SOCKADDR msg=audit(1699999992.300:2003): saddr=0200115CB9DC6504000000000000
 #   init_module (module load)     -> 100060 (SBoB signature: module-load ...)
 #   ptrace (process tracing)      -> 100062 (SBoB signature: process-tracing ...)
 
-type=SYSCALL msg=audit(1699999993.400:2004): arch=c000003e syscall=175 success=yes exit=0 items=1 ppid=3003 pid=3004 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=4294967295 comm="kmod" exe="/usr/bin/kmod" subj=unconfined key="sbob-module-load"
+type=SYSCALL msg=audit(1699999993.400:2004): arch=c000003e syscall=175 success=yes exit=0 items=1 a0=0x561a4f2c58f0 a1=0x1000 a2=0x0 ppid=3003 pid=3004 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=4294967295 comm="kmod" exe="/usr/bin/kmod" subj=unconfined key="sbob-module-load"
 
-type=SYSCALL msg=audit(1699999994.500:2005): arch=c000003e syscall=101 success=yes exit=0 items=1 ppid=3004 pid=3005 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="gdb" exe="/usr/bin/gdb" subj=unconfined key="sbob-process-tracing"
+type=SYSCALL msg=audit(1699999994.500:2005): arch=c000003e syscall=101 success=yes exit=0 items=1 a0=0x10 a1=0xbb9 a2=0x0 ppid=3004 pid=3005 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="gdb" exe="/usr/bin/gdb" subj=unconfined key="sbob-process-tracing"

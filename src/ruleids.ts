@@ -15,6 +15,14 @@
  *   0-4 = Linux / k8s-node rule kinds: 0 base, 1 drift, 2 escalation, 3 informational, 4 exemption
  *   5-9 = Windows rule kinds:          5 base, 6 drift, 7 escalation, 8 informational, 9 exemption
  * Linux and k8s-node share variants because k8s nodes run the Linux agent.
+ *   digit 9 in the Linux band = 'sustained' (issue #42): the sustained-signature
+ *   child of a signature OVERLAY (e.g. (0,9) sensitive-file repetition).
+ *   Rationale: on wazuh 4.14 the if_matched_sid correlation context only
+ *   accumulates while the parent rule WINS the matched-rule selection, so a
+ *   drift-parent sustained rule never fires when a higher-level overlay child
+ *   (level 12) wins the event; overlay repetition needs its own sustained
+ *   child. (0,9) cannot collide with the Windows band because the Windows
+ *   target does not emit a (0,9)-class rule (signature pack deferred).
  */
 import { SbobError } from "./errors.ts";
 import { parseYaml, type YamlValue } from "./yaml.ts";
@@ -33,7 +41,7 @@ export const SECTION_CODES = {
   enforcement: 11,
 } as const;
 
-export const LINUX_VARIANTS = { base: 0, drift: 1, escalation: 2, info: 3, exemption: 4 } as const;
+export const LINUX_VARIANTS = { base: 0, drift: 1, escalation: 2, info: 3, exemption: 4, sustained: 9 } as const;
 export const WINDOWS_VARIANTS = { base: 5, drift: 6, escalation: 7, info: 8, exemption: 9 } as const;
 
 export interface SlotRegistry {

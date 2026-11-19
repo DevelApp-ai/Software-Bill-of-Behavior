@@ -59,7 +59,15 @@ jobs:
       - name: Start the disposable Wazuh manager (${{ env.WAZUH_IMAGE }})
         run: |
           docker pull "$WAZUH_IMAGE"
+          # --ulimit nofile=458752:458752: analysisd setrlimit(RLIMIT_NOFILE,
+          # 458752) fails with EPERM when the container inherits a lower hard
+          # limit and lacks CAP_SYS_RESOURCE ("Could not set resource limit
+          # for file descriptors"), making even `wazuh-analysisd -t` exit 1.
+          # Pre-set the exact limit so the setrlimit is a no-op.
+          # --cap-add=SYS_RESOURCE: belt-and-braces (lets root raise limits).
           docker run -d --name "$WAZUH_CONTAINER" \
+            --ulimit nofile=458752:458752 \
+            --cap-add=SYS_RESOURCE \
             -p 1514:1514 -p 1515:1515 -p 55000:55000 \
             "$WAZUH_IMAGE"
           # wait up to 8 min: any HTTP response (even 401) means the API is listening
@@ -144,6 +152,9 @@ jobs:
           if [ -d staging/lists ]; then
             docker cp staging/lists/. "$WAZUH_CONTAINER:/var/ossec/etc/lists/"
           fi
+          # docker cp leaves files root-owned; CDB lists auto-compile to .cdb
+          # at load time and the loader needs wazuh-owned, writable list dirs
+          docker exec "$WAZUH_CONTAINER" sh -c 'chown -R wazuh:wazuh /var/ossec/etc/rules /var/ossec/etc/decoders /var/ossec/etc/lists'
 
           # 3. CDB lists are NOT auto-loaded by Wazuh: every generated sbob list
           #    must be declared in the ossec.conf <ruleset> block
@@ -165,7 +176,37 @@ jobs:
           else
             echo "no CDB lists in this bundle — ossec.conf left untouched"
           fi
+          # 4. stock 4.14. ships an EXAMPLE rule with id 100001 inside
+          #     /var/ossec/etc/rules/local_rules.xml — that id collides with
+          #     the SBoB slot-0 band and the loader rejects duplicate ids.
+          #     Replace it with an inert placeholder (outside the 100xxx band,
+          #     if_sid 5716 sshd parent, srcip that never fires).
+          printf '%s\n' \
+            '<!-- SBoB lab validation: stock example rule 100001 collides with' \
+            '     the SBoB slot-0 band (issue #42) — inert placeholder instead -->' \
+            '<group name="local,syslog,sshd,">' \
+            '  <rule id="910001" level="0">' \
+            '    <if_sid>5716</if_sid>' \
+            '    <srcip>1.1.1.1</srcip>' \
+            '    <description>INERT placeholder (SBoB lab): never fires</description>' \
+            '  </rule>' \
+            '</group>' \
+            | docker exec -i "$WAZUH_CONTAINER" sh -c 'cat > /var/ossec/etc/rules/local_rules.xml'
+
+          # 5. windows target ONLY — the ROOT-ANCHOR VALIDATION TRANSFORM
+          #     (issue #42): the production bundle anchors its global base
+          #     rule on the shipped sysmon parent (<if_sid>61600</if_sid>),
+          #     which neither the wazuh-logtest CLI nor the API session can
+          #     reach (the CLI forces syslog-format agent events). For replay
+          #     only, swap that ONE anchor to <decoded_as>json</decoded_as> —
+          #     identical ids and downstream conditions, json-decodable.
+          #     Everything is restored by the "Restore" step below.
+          if [ "${{ matrix.target }}" = "windows" ]; then
+            docker exec "$WAZUH_CONTAINER" sh -c \
+              'f=$(ls /var/ossec/etc/rules/*_redis_windows.xml 2>/dev/null | head -1) && [ -n "$f" ] && cp "$f" "$f.production" && sed -i "0,/<if_sid>61600<\/if_sid>/s//<decoded_as>json<\/decoded_as>/" "$f" && echo "validation transform applied to $f:" && grep -n "decoded_as>json" "$f"'
+          fi
           docker cp ossec.conf "$WAZUH_CONTAINER:/var/ossec/etc/ossec.conf"
+          docker exec "$WAZUH_CONTAINER" sh -c 'chown wazuh:wazuh /var/ossec/etc/ossec.conf /var/ossec/etc/rules/local_rules.xml'
 
       - name: Restart the manager and wait for the API (bundle must load cleanly)
         run: |
@@ -189,6 +230,20 @@ jobs:
           echo "analysisd is NOT running — the manager rejected the ruleset"
           exit 1
 
+      - name: analysisd config gate (zero errors AND zero warnings)
+        run: |
+          # wazuh-analysisd -t is silent when the ruleset loads clean: any
+          # output (duplicate ids, undeclared lists, warnings that silently
+          # drop rules, "Group without rule", PCRE2 conditions on static
+          # fields...) is a hard fail — a vacuously-green lane with silently
+          # dropped rules was issue #42's actual failure mode.
+          out=$(docker exec "$WAZUH_CONTAINER" /var/ossec/bin/wazuh-analysisd -t 2>&1 || true)
+          if [ -n "$out" ]; then
+            echo "::error::analysisd -t not clean [${{ matrix.target }}]: $(printf '%s' "$out" | head -c 1200 | tr '\n' '~')"
+            exit 1
+          fi
+          echo "analysisd -t clean: no errors, no warnings [${{ matrix.target }}]"
+
       - name: Corpus gate (wazuh-logtest — benign corpus silent, drift corpus fires)
         run: |
           # wazuh-logtest reads the manager's live ruleset, so the corpus replay
@@ -202,3 +257,14 @@ jobs:
         run: |
           SBOB_WAZUH_API_USER="$WAZUH_API_USER" SBOB_WAZUH_API_PASS="$WAZUH_API_PASS" \
             node scripts/logtest-api.ts --target "${{ matrix.target }}" --api "$WAZUH_API" 2>&1 | tee api-gate.log
+
+      - name: Restore the production windows rules file (undo the validation transform)
+        if: always() && matrix.target == 'windows'
+        run: |
+          # the root-anchor validation transform left a .production copy next
+          # to the replayed file; restore it so the disposable container ends
+          # with the true production artifact on disk (the validation anchor
+          # must never be mistaken for what the transpiler emits)
+          docker exec "$WAZUH_CONTAINER" sh -c \
+            'n=0; for f in /var/ossec/etc/rules/*.production; do [ -f "$f" ] || continue; mv "$f" "${f%.production}"; n=$((n+1)); done; f=/var/ossec/etc/rules/*_redis_windows.xml; if [ "$n" -gt 0 ]; then echo "restored $n production file(s)"; grep -c "if_sid>61600" $f; else echo "no transform backup found (nothing was applied)"; fi' || true
+

