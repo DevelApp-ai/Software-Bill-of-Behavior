@@ -24,8 +24,7 @@
   "files": [
     "wazuh/audit/sbob/redis.rules",
     "wazuh/lists/sbob/redis/execs",
-    "wazuh/lists/sbob/redis/opens",
-    "wazuh/lists/sbob/redis/egress_addrs",
+    "wazuh/lists/sbob/redis/egress_saddrs",
     "wazuh/lists/sbob/redis/ingress_addrs",
     "wazuh/decoders/sbob/redis.xml",
     "wazuh/rules/sbob/100000_redis_linux.xml",
@@ -425,17 +424,15 @@
     "capabilities: section-absent",
     "rulePolicies: section-absent",
     "rulePolicies: section-absent — signature pack emitted with defaults (fire-by-default, no exemptions; TDS 7.4)",
-    "signatures: audit keys are node-scoped (Mode B, attribution-weak) — declare processAllowed for container runtimes and node daemons (kubelet, containerd) to suppress expected noise"
+    "signatures: audit keys are node-scoped (Mode B, attribution-weak) — declare processAllowed for container runtimes and node daemons (kubelet, containerd) to suppress expected noise",
+    "signatures: the kubernetes-api-access node-side connect overlay (0,3) is not emitted on wazuh 4.14 — srcip is a static field and analysisd rejects PCRE2 conditions on static fields (CDB <list> on static fields IS allowed; that is how the egress drift rule works). The policy is carried by the manager-side k8s audit-log rule (6,4)",
+    "signatures: sensitive-file overlay repetition escalates via the (0,9) sustained-signature child; the SA-token overlay (0,2) has no dedicated sustained child on the band — triage uses firedtimes (issue #42)",
+    "wazuh-4.14: rules ride the SHIPPED auditd decoder fields (audit.*) under the shipped 'audit' group; no custom audit decoders are emitted (the shipped family preempts custom audit roots)",
+    "wazuh-4.14: frequency/timeframe are rule attributes; sustained children correlate via if_matched_sid + same_field (srcip correlation uses same_srcip)",
+    "wazuh-4.14: correlation context accumulates only while the parent rule WINS the matched-rule selection — when a level-12 signature overlay wins the event (e.g. sensitive-file), the drift-parent sustained rule cannot fire; overlay repetition is escalated by the (0,9) sustained-signature child (issue #42)",
+    "wazuh-4.14: CDB lists must be declared with <list> elements in the manager's ossec.conf (ossec.conf-relative 'etc/lists/…' spelling); an undeclared list is a loader warning and the rule is ignored",
+    "wazuh-4.14: opens values decode WITH surrounding quotes (audit.directory.name) — the opens allowlist is a quote-anchored PCRE2 negation, not a CDB list",
+    "wazuh-4.14: egress allowlist keys are saddr hex spellings (padded 32-hex + truncated 16-hex) matched on the STATIC srcip field via a CDB list (PCRE2 on static fields is rejected; list lookups are allowed)"
   ],
-  "labValidation": "validated",
-  "labValidationEvidence": {
-    "targets": [
-      "linux",
-      "windows",
-      "k8s-node"
-    ],
-    "manager": "wazuh/wazuh-manager:4.14.6",
-    "date": "2026-10-29",
-    "evidence": "https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214"
-  }
+  "labValidation": "pending"
 }

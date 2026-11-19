@@ -421,6 +421,8 @@
     "rulePolicies: section-absent",
     "rulePolicies: section-absent — signature pack emitted with defaults (fire-by-default, no exemptions; TDS 7.4)",
     "signatures: audit keys are node-scoped (Mode B, attribution-weak) — declare processAllowed for container runtimes and node daemons (kubelet, containerd) to suppress expected noise",
+    "signatures: the kubernetes-api-access node-side connect overlay (0,3) is not emitted on wazuh 4.14 — srcip is a static field and analysisd rejects PCRE2 conditions on static fields (CDB <list> on static fields IS allowed; that is how the egress drift rule works). The policy is carried by the manager-side k8s audit-log rule (6,4)",
+    "signatures: sensitive-file overlay repetition escalates via the (0,9) sustained-signature child; the SA-token overlay (0,2) has no dedicated sustained child on the band — triage uses firedtimes (issue #42)",
     "windows: execs[].args drift is heuristic-equivalent (CommandLine tokenization, TDS 7.3.4) — flagged partial",
     "windows: opens[].flags are not evaluable from Sysmon telemetry; EID 11 covers file-create only (TDS 8.2)",
     "windows: capabilities[] is N/A on Windows (TDS 8.2)",
@@ -428,15 +430,5 @@
     "windows: requires the shipped ruleset parent rule 61600 and Wazuh >= 4.4 (type=\"pcre2\" field attribute)",
     "windows: rulePolicies signature rules are deferred to a later milestone (auditd-keyed rules have no Sysmon equivalent yet; flagged partial SIG_WIN_DEFERRED in the coverage matrix)"
   ],
-  "labValidation": "validated",
-  "labValidationEvidence": {
-    "targets": [
-      "linux",
-      "windows",
-      "k8s-node"
-    ],
-    "manager": "wazuh/wazuh-manager:4.14.6",
-    "date": "2026-10-29",
-    "evidence": "https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214"
-  }
+  "labValidation": "pending"
 }

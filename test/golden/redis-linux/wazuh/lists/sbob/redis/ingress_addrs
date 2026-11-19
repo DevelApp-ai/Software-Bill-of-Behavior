@@ -1,2 +1,2 @@
-# ingress CDB address list: key=ip/mask (canonicalized), value=identifier
+# ingress CDB address list (INFORMATIONAL — Linux accept() telemetry cannot attribute peers, TDS 8): key=ip/mask, value=identifier
 10.244.0.0/16:app-clients
