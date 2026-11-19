@@ -14,14 +14,17 @@
 #   manager   pinned manager image the corpus was replayed against
 #   date      validation date (YYYY-MM-DD)
 #   evidence  Actions run URL of the green lab-validate matrix
-validations:
-  - workload: redis
-    targets: [linux, windows, k8s-node]
-    manager: wazuh/wazuh-manager:4.14.6
-    date: "2026-10-29"
-    evidence: https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214
-  - workload: php-fpm
-    targets: [linux]
-    manager: wazuh/wazuh-manager:4.14.6
-    date: "2026-10-29"
-    evidence: https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214
+#
+# RETRACTED (issue #42): the records previously listed here cited Actions run
+#   https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/40931193214
+# that run was VACUOUSLY GREEN: the 4.14.6 transpiled bundles did not actually
+# load on the wazuh-manager (9 loader defects — duplicate slot collisions with
+# the shipped local_rules.xml example, undeclared CDB lists silently dropping
+# their rules, PCRE2 conditions on static fields, bare-rule files without the
+# mandatory <group> wrapper, child-sustained rules rendered with loop-captured
+# ids), and the lane asserted nothing about it (no analysisd -t gate, stale
+# logtest output spelling, 2>/dev/null silencing stderr). The evidence is
+# retracted: every workload x target pair is LAB VALIDATION PENDING until a
+# green lab-validate run of the FIXED transpiler + FIXED lane stamps a new
+# record here (the run URL of the green matrix is the new evidence).
+validations: []

@@ -1,5 +1,6 @@
 /**
- * Kubernetes-node codegen (TDS sections 4.4, 6.3, 7.3.2) — node agents.
+ * Kubernetes-node codegen (TDS sections 4.4, 6.3, 7.3.2) — node agents,
+ * wazuh-manager 4.14.6 schema (issue #42 fix).
  *
  * K8s nodes run the Linux agent and share the Linux variant band (TDS 6.1),
  * so this bundle composes the shared Linux building blocks and adds the
@@ -8,8 +9,14 @@
  *   - wazuh/audit/sbob/<name>.rules        Mode A exe-scoped audit keys
  *                                          (attribution tier 2, TDS 6.3)
  *   - wazuh/agent-conf/sbob/<name>-k8s.xml  docker-listener wodle (TDS 4.4)
- *   - wazuh/decoders/sbob/<name>-k8s.xml    audit chain + cgroup decoder
- *                                          (attribution tier 1, auditd >= 3.0)
+ *   - wazuh/decoders/sbob/<name>-k8s.xml    config-check decoder ONLY —
+ *                                          NO cgroup attribution decoders:
+ *                                          on wazuh 4.14.6 the SHIPPED
+ *                                          auditd decoder family preempts
+ *                                          custom audit ROOT decoders, so a
+ *                                          cgroup= child decoder can never
+ *                                          run (tier-1 attribution is
+ *                                          INERT on 4.14.6; documented)
  *   - wazuh/lists/sbob/<name>/*            CDB allowlists (shared design)
  *   - wazuh/lists/sbob/k8s/podmap         pod uid -> namespace/pod seed;
  *                                          runtime data, refreshed by
@@ -17,35 +24,33 @@
  *   - wazuh/rules/sbob/<base>_<name>_k8s-node.xml  drift rules (shared)
  *                                          + attribution section (7x)
  *                                          + signature pack (rulePolicies, M4)
+ *                                          + ops section (M5)
  *   - wazuh/manager/sbob/k8s-api-audit.md  API-server audit ingestion path
  *   - wazuh/manager/sbob/<name>-envoy.md   Envoy JSON access-log contract for
  *                                          endpoints[] drift (M6, TDS 13)
- *                                          (evaluated by the manager-side
- *                                          kubernetes-api-access rule)
  *   - wazuh/agent-conf/sbob/<name>-audit-digest.sh   node-side digest script (M5)
  *   - <name>.manifest.json                 manifest + coverage matrix (TDS 8)
  *
  * Attribution rules (TDS 6.3, section code 7):
- *   (7,0) base          — cgroup-derived sbob.pod_uid present (level 0)
- *   (7,1) unresolved     — pod uid NOT in the node podmap (level 3; stale map)
- *   (7,2) reserved        — escalation digit, unused in M3
- *   (7,3) weak fallback  — node-scoped Mode B keys: attribution=weak (level 3)
- *   (7,4) lifecycle      — docker-listener container start for the workload
- *                          image (level 3; chains off shipped rule 87900)
- *
- * Deviation from the TDS 7.3.2 sketch, documented there: the Wazuh rule engine
- * cannot inject CDB values into alert fields, so pod/namespace stamping is
- * delivered as decoder fields (sbob.pod_uid travels on every alert) plus the
- * podmap value column (`namespace/pod`) for triage; the rules assert podmap
- * membership (match_key / not_match_key) rather than "stamping".
+ *   (7,0) attribution base  — INERT on 4.14.6: no decoder emits sbob.pod_uid
+ *                            (shipped auditd family preempts custom audit
+ *                            roots, cgroup children never run); kept in
+ *                            shape for tier-1 forward-compat
+ *   (7,1) podmap unresolved — INERT on 4.14.6 (child of 7,0, never fires)
+ *   (7,2) reserved         — escalation digit, unused
+ *   (7,3) weak fallback    — node-scoped Mode B keys: attribution=weak
+ *                            (rides the shipped audit.key field; fires only
+ *                            when the workload runs Mode B)
+ *   (7,4) lifecycle         — docker-listener container start for the workload
+ *                            image (level 3; chains off shipped rule 87900)
  */
 import { escapeRegExp } from "../wildcards.ts";
 import type { IdAllocator } from "../ruleids.ts";
 import type { IR } from "../types.ts";
 import type { Decoder, XmlRule } from "./xml.ts";
-import { renderDecoder, renderRule, xmlFileHeader } from "./xml.ts";
+import { renderDecoder, renderRuleFile, xmlFileHeader } from "./xml.ts";
 import type { BundleFile } from "./linux.ts";
-import { auditDecoders, auditFragmentLines, cdbListFiles, linuxSectionRules } from "./linux.ts";
+import { auditFragmentLines, cdbListFiles, linuxSectionRules, listSrc } from "./linux.ts";
 import { envoyIngestionDoc, envoyListFiles, envoyRules } from "./envoy.ts";
 import { signatureRulesK8s, signatureRulesShared, signatureCoverageNotes } from "./signatures.ts";
 import {
@@ -95,8 +100,8 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       "# k8s-node: container exes resolve inside the pod mount namespace (overlayfs),",
       "# so Mode A keys carry the workload identity implicitly (TDS 6.3 tier 2).",
       modeA
-        ? "# cgroup field: keep auditd >= 3.0 defaults — SYSCALL records then carry cgroup=, enabling tier-1 pod attribution."
-        : "# Mode B: attribution falls back to tier 3 (weak) unless cgroup emission is enabled.",
+        ? "# tier-1 cgroup attribution is INERT on wazuh 4.14.6 (shipped auditd family preempts custom audit roots);"
+        : "# Mode B: attribution falls back to tier 3 (weak).",
       "",
     );
     files.push({ path: `wazuh/audit/sbob/${name}.rules`, content: lines.join("\n") + "\n" });
@@ -118,51 +123,29 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
       "#         — because CDB lookups are exact-match; keep both lines per pod.",
       "# value = namespace/podname (carried for triage; TDS 6.3 tier 1)",
       "# maintained by scripts/sbob-podmap-refresh.sh (crictl or docker backend);",
-      "# the manager loads it as a CDB list — restart the manager after refresh.",
+      "# the manager loads it as a CDB list (<list>etc/lists/sbob/k8s/podmap</list>",
+      "# in ossec.conf) — restart the manager after refresh.",
+      "#",
+      "# wazuh 4.14.6: TIER-1 ATTRIBUTION IS INERT — the shipped auditd decoder",
+      "# family preempts custom audit ROOT decoders, so the cgroup= child decoders",
+      "# that would stamp sbob.pod_uid never run. The podmap list and the (7,1)",
+      "# rule are kept in shape for forward-compat (issue #42 documents this).",
     ].join("\n"),
   });
 
   // --------------------------------------------------------------------------
-  // 3. decoder chain: audit family + cgroup attribution decoder
+  // 3. decoder file: config-check decoder ONLY (no cgroup decoders — the
+  //    shipped auditd family preempts custom audit roots on 4.14.6, so
+  //    cgroup child decoders would never run; see the (7,x) rule comments)
   // --------------------------------------------------------------------------
   {
-    const { auditKeys } = auditFragmentLines(ir);
-    const cgroupDecoderComment =
-      "auditd >= 3.0 emits cgroup= on SYSCALL records; the decoders extract the kubepods pod uid " +
-      "(TDS 6.3 tier 1). Real pod uids are hex UUIDs, not decimal; the three real-world cgroup forms are " +
-      "covered by sibling decoders: cgroup v2/systemd with underscores (pod<uid>.scope), cgroup v2/systemd " +
-      "with dashes (pod<uid>.scope), and cgroup v1 (pod<uid>/). OS_Regex-safe on purpose (decoders default " +
-      "to OS_Regex): no lookaheads, no character classes, no bounded quantifiers";
-    const decoders: Decoder[] = [
-      ...auditDecoders(name, auditKeys),
-      configCheckDecoder(name),
-      {
-        // cgroup v2/systemd — kubelet escapes uid dashes as underscores: pod<uid_underscores>.scope
-        name: `sbob-${name}-audit-cgroup`,
-        parent: `sbob-${name}-audit-key`,
-        regex: "cgroup=\\S*kubepods\\S*pod(\\w+)\\.scope\\S*",
-        order: "sbob.pod_uid",
-        comment: cgroupDecoderComment,
-      },
-      {
-        // cgroup v2/systemd — dashes preserved: pod<uid_dashes>.scope
-        name: `sbob-${name}-audit-cgroup-dash`,
-        parent: `sbob-${name}-audit-key`,
-        regex: "cgroup=\\S*kubepods\\S*pod(\\w+-\\w+-\\w+-\\w+-\\w+)\\.scope\\S*",
-        order: "sbob.pod_uid",
-        comment: cgroupDecoderComment,
-      },
-      {
-        // cgroup v1 — /kubepods/<qos>/pod<uid_dashes>/<container-id> (no .scope)
-        name: `sbob-${name}-audit-cgroup-v1`,
-        parent: `sbob-${name}-audit-key`,
-        regex: "cgroup=\\S*kubepods\\S*pod(\\w+-\\w+-\\w+-\\w+-\\w+)/\\S*",
-        order: "sbob.pod_uid",
-        comment: cgroupDecoderComment,
-      },
-    ];
+    const decoders: Decoder[] = [configCheckDecoder(name)];
     const xml = [
-      xmlFileHeader(`sbob decoders for workload ${name} — k8s-node target (audit + cgroup attribution)`, name, labNote(alloc)),
+      xmlFileHeader(
+        `sbob decoders for workload ${name} — k8s-node target (config-check only; audit lines ride the SHIPPED auditd decoder family, cgroup attribution INERT on 4.14.6)`,
+        name,
+        labNote(alloc),
+      ),
       "",
       ...decoders.map(renderDecoder).join("\n\n").split("\n"),
       "",
@@ -200,40 +183,46 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
   // --------------------------------------------------------------------------
   {
     const rules: XmlRule[] = linuxSectionRules(ir, alloc);
-    const groups = (extra: string[]) => ["sbob", name, ...extra];
+    const groups = (extra: string[]) => [["sbob", name, ...extra]];
 
-    // (7,0) attribution base — cgroup-derived pod uid present (tier 1)
+    // (7,0) attribution base — INERT on 4.14.6: no decoder emits sbob.pod_uid
+    // (the shipped auditd family preempts custom audit roots, so a cgroup child
+    // decoder never runs). Kept in shape for tier-1 forward-compat.
     const attrBaseId = alloc.linux("attribution", "base");
     rules.push({
       id: attrBaseId,
       level: 0,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.pod_uid", regex: "^[0-9a-f]{8}[-_][0-9a-f]{4}[-_][0-9a-f]{4}[-_][0-9a-f]{4}[-_][0-9a-f]{12}$" }],
+      ifGroup: "audit",
+      fields: [{ name: "sbob.pod_uid", regex: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }],
       description: `SBoB attribution base: audit event carries a cgroup-derived pod uid (k8s node, ${name} scope)`,
-      groups: [groups(["sbob-attribution"])],
-      comment: "drift alerts already carry sbob.pod_uid via the decoder; this chain asserts podmap resolution (TDS 6.3 tier 1)",
+      groups: groups(["sbob-attribution"]),
+      comment:
+        "INERT on wazuh 4.14.6: sbob.pod_uid is never decoded (the shipped auditd decoder family preempts custom audit ROOT decoders, so cgroup= children never run) — " +
+        "kept for tier-1 forward-compat; workload attribution relies on Mode A exe-scoped keys (tier 2, TDS 6.3)",
     });
 
-    // (7,1) podmap unresolved — uid not in podmap (stale refresh)
+    // (7,1) podmap unresolved — INERT on 4.14.6 (child of 7,0, never fires)
     rules.push({
       id: alloc.linux("attribution", "drift"),
       level: 3,
       ifSid: attrBaseId,
-      list: { field: "sbob.pod_uid", lookup: "not_match_key", src: "sbob/k8s/podmap" },
+      list: { field: "sbob.pod_uid", lookup: "not_match_key", src: listSrc("sbob/k8s/podmap") },
       fields: [],
       description: `SBoB attribution: pod uid $(sbob.pod_uid) NOT in the node podmap — run scripts/sbob-podmap-refresh.sh on the node (TDS 6.3 tier 1, stale map)`,
-      groups: [groups(["sbob-attribution", "attribution-stale"])],
+      groups: groups(["sbob-attribution", "attribution-stale"]),
       options: ["no_full_log"],
+      comment: "INERT on wazuh 4.14.6 (the parent 7,0 never matches); podmap list must be declared via <list> in ossec.conf",
     });
 
-    // (7,3) weak fallback — node-scoped Mode B keys (tier 3)
+    // (7,3) weak fallback — node-scoped Mode B keys (tier 3); rides the
+    // SHIPPED audit.key field (never the never-decoded sbob.key)
     rules.push({
       id: alloc.linux("attribution", "info"),
       level: 3,
-      ifGroup: "auditd",
-      fields: [{ name: "sbob.key", regex: "^sbob-(?:exec|open|connect)$" }],
+      ifGroup: "audit",
+      fields: [{ name: "audit.key", regex: "^sbob-(?:exec|open|connect)$" }],
       description: `SBoB attribution: weak — node-scoped audit key (Mode B fallback); sbob.workload=unknown-node-scope, host-process collision possible (TDS 6.3 tier 3)`,
-      groups: [groups(["sbob-attribution", "attribution-weak"])],
+      groups: groups(["sbob-attribution", "attribution-weak"]),
       comment: "only fires when the workload runs Mode B (no literal exes); Mode A keys carry identity implicitly",
       options: ["no_full_log"],
     });
@@ -249,7 +238,7 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
         { name: "docker.Actor.Attributes.image", regex: imageRepoRegex(ir.workload.imageID) },
       ],
       description: `SBoB lifecycle: container started from the workload image — $(docker.Actor.Attributes.name); correlate exec drift timestamps for binary-not-in-image investigation (TDS 4.4)`,
-      groups: [groups(["sbob-attribution", "container-lifecycle"])],
+      groups: groups(["sbob-attribution", "container-lifecycle"]),
       comment: `chains off shipped docker integration rule ${DOCKER_PARENT_RULE} (0560-docker_integration_rules.xml); image matched by repo name — docker events carry the image reference, not the digest`,
       options: ["no_full_log"],
     });
@@ -266,15 +255,17 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
     // M6 endpoints[] section (TDS 13): L7 endpoint drift via envoy JSON (9,1)/(9,2)
     rules.push(...envoyRules(ir, alloc, name));
 
-    const xml = [
-      xmlFileHeader(`sbob drift + attribution + signature + ops rules for workload ${name} — k8s-node target`, name, labNote(alloc)),
-      "",
-      ...rules.map(renderRule).join("\n\n").split("\n"),
-      "",
-    ].join("\n");
     files.push({
       path: `wazuh/rules/sbob/${100000 + alloc.slot * 100}_${name}_k8s-node.xml`,
-      content: xml,
+      content: renderRuleFile(
+        xmlFileHeader(
+          `sbob drift + attribution + signature + ops rules for workload ${name} — k8s-node target (wazuh 4.14 schema, issue #42)`,
+          name,
+          labNote(alloc),
+        ),
+        ["sbob", name],
+        rules,
+      ),
     });
   }
 
@@ -315,7 +306,8 @@ export function generateK8sNodeBundle(ir: IR, alloc: IdAllocator): BundleFile[] 
               ...ir.coverageNotes,
               ...signatureCoverageNotes(ir),
               "k8s: attribution tiers per TDS 6.3 — 1 cgroup+podmap (auditd >= 3.0), 2 Mode A exe-scoped keys (default), 3 weak fallback (attribution=weak)",
-              "k8s: podmap (sbob/k8s/podmap) is node runtime data maintained by scripts/sbob-podmap-refresh.sh; not derived from the SBoB",
+              "k8s: TIER-1 ATTRIBUTION IS INERT on wazuh-manager 4.14.6 — the shipped auditd decoder family preempts custom audit ROOT decoders, so the cgroup= child decoders never run and sbob.pod_uid is never stamped; rules (7,0)/(7,1) are kept in shape for forward-compat and documented INERT (issue #42)",
+              "k8s: podmap (etc/lists/sbob/k8s/podmap) is node runtime data maintained by scripts/sbob-podmap-refresh.sh; declare it in the manager ossec.conf (<list> element) — not derived from the SBoB",
               "k8s: docker-listener lifecycle rule requires the shipped integration ruleset (parent rule 87900)",
               "k8s: DNS-name egress entries are not observable from node auditd telemetry — Windows agents detect them via Sysmon EID 22 (TDS 8)",
               "k8s: manager-side kubernetes-api-access rule (rulePolicies signature) evaluates the API audit log ingested per wazuh/manager/sbob/k8s-api-audit.md",
