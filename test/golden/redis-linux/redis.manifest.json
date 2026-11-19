@@ -434,5 +434,15 @@
     "wazuh-4.14: opens values decode WITH surrounding quotes (audit.directory.name) — the opens allowlist is a quote-anchored PCRE2 negation, not a CDB list",
     "wazuh-4.14: egress allowlist keys are saddr hex spellings (padded 32-hex + truncated 16-hex) matched on the STATIC srcip field via a CDB list (PCRE2 on static fields is rejected; list lookups are allowed)"
   ],
-  "labValidation": "pending"
+  "labValidation": "validated",
+  "labValidationEvidence": {
+    "targets": [
+      "linux",
+      "k8s-node",
+      "windows"
+    ],
+    "manager": "wazuh/wazuh-manager:4.14.6",
+    "date": "2026-11-19",
+    "evidence": "https://github.com/DevelApp-ai/Software-Bill-of-Behavior/actions/runs/44582667834"
+  }
 }
