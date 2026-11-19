@@ -281,11 +281,16 @@ export function makeTransport(verifyTls: boolean, sessionLogFormat: string, sess
         sessionToken === null
           ? { event: log, log_format: sessionLogFormat, location: sessionLocation }
           : { event: log, log_format: sessionLogFormat, location: sessionLocation, token: sessionToken };
+      const body = JSON.stringify(payload);
       const reply = await requestRaw(
         `${api}/logtest`,
         "PUT",
-        { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
-        JSON.stringify(payload),
+        // explicit Content-Length: node otherwise sends Transfer-Encoding:
+        // chunked on a reused keep-alive socket, and the 4.14 API
+        // (connexion RequestBodyValidator) rejects such requests with
+        // HTTP 400 "RequestBody is required"
+        { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json", "Content-Length": String(body.length) },
+        body,
         verifyTls,
       );
       if (reply.status !== 200) {
